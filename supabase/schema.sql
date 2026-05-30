@@ -20,6 +20,7 @@ create table if not exists public.stickers (
   image_url text,
   owned boolean not null default false,
   quantity integer not null default 0 check (quantity >= 0),
+  is_stuck boolean not null default false,
   wishlisted boolean not null default false,
   notes text,
   created_at timestamptz not null default now(),
@@ -29,6 +30,9 @@ create table if not exists public.stickers (
 
 create index if not exists stickers_album_id_idx on public.stickers(album_id);
 create index if not exists stickers_album_code_idx on public.stickers(album_id, code);
+
+alter table public.stickers
+add column if not exists is_stuck boolean not null default false;
 
 create or replace function public.set_updated_at()
 returns trigger as $$

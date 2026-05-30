@@ -18,6 +18,7 @@ export type Sticker = {
   image_url: string | null;
   owned: boolean;
   quantity: number;
+  is_stuck: boolean;
   wishlisted: boolean;
   notes: string | null;
   created_at: string;
@@ -40,6 +41,7 @@ export type StickerInput = {
   image_url?: string;
   owned: boolean;
   quantity: number;
+  is_stuck?: boolean;
   wishlisted: boolean;
   notes?: string;
 };
@@ -58,6 +60,7 @@ export type CollectionStats = {
   owned: number;
   missing: number;
   duplicates: number;
+  stuck: number;
   wishlisted: number;
   totalRegistered: number;
   completion: number;

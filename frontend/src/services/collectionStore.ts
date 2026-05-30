@@ -32,6 +32,7 @@ const seedStickers: Sticker[] = [
     image_url: '',
     owned: true,
     quantity: 2,
+    is_stuck: true,
     wishlisted: false,
     notes: 'Uma repetida para troca.',
     created_at: now(),
@@ -46,6 +47,7 @@ const seedStickers: Sticker[] = [
     image_url: '',
     owned: false,
     quantity: 0,
+    is_stuck: false,
     wishlisted: true,
     notes: '',
     created_at: now(),
@@ -60,6 +62,7 @@ const seedStickers: Sticker[] = [
     image_url: '',
     owned: true,
     quantity: 1,
+    is_stuck: false,
     wishlisted: false,
     notes: '',
     created_at: now(),
@@ -83,6 +86,16 @@ function readLocal<T>(key: string, fallback: T): T {
 function writeLocal<T>(key: string, value: T): T {
   window.localStorage.setItem(key, JSON.stringify(value));
   return value;
+}
+
+function hydrateSticker(sticker: Sticker): Sticker {
+  return {
+    ...sticker,
+    owned: Boolean(sticker.owned || sticker.quantity > 0),
+    quantity: Number(sticker.quantity || 0),
+    is_stuck: Boolean(sticker.is_stuck),
+    wishlisted: Boolean(sticker.wishlisted),
+  };
 }
 
 async function supabaseRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -161,14 +174,16 @@ export const collectionStore = {
 
   async listStickers(albumId: string): Promise<Sticker[]> {
     if (isSupabaseConfigured) {
-      return supabaseRequest<Sticker[]>(
+      const result = await supabaseRequest<Sticker[]>(
         `stickers?album_id=eq.${encodeURIComponent(albumId)}&select=*&order=code.asc`
       );
+      return result.map(hydrateSticker);
     }
 
     const stickers = readLocal<Sticker[]>(localStickersKey, seedStickers);
     return stickers
       .filter((sticker) => sticker.album_id === albumId)
+      .map(hydrateSticker)
       .sort((a, b) => a.code.localeCompare(b.code));
   },
 
@@ -193,6 +208,7 @@ export const collectionStore = {
       image_url: payload.image_url || null,
       owned: Boolean(payload.owned),
       quantity: Number(payload.quantity || 0),
+      is_stuck: Boolean(payload.is_stuck),
       wishlisted: Boolean(payload.wishlisted),
       notes: payload.notes || null,
       created_at: now(),
@@ -211,6 +227,7 @@ export const collectionStore = {
       image_url: item.image_url?.trim() || null,
       owned: false,
       quantity: 0,
+      is_stuck: false,
       wishlisted: false,
       notes: item.notes?.trim() || null,
     }));
@@ -257,6 +274,7 @@ export const collectionStore = {
         image_url: item.image_url,
         owned: false,
         quantity: 0,
+        is_stuck: false,
         wishlisted: false,
         notes: item.notes,
         created_at: now(),
@@ -277,11 +295,12 @@ export const collectionStore = {
       const result = await supabaseRequest<Sticker[]>(
         `stickers?album_id=eq.${encodeURIComponent(albumId)}&code=eq.${encodeURIComponent(normalizedCode)}&select=*&limit=1`
       );
-      return result[0] || null;
+      return result[0] ? hydrateSticker(result[0]) : null;
     }
 
     const stickers = readLocal<Sticker[]>(localStickersKey, seedStickers);
-    return stickers.find((sticker) => sticker.album_id === albumId && normalizeStickerCode(sticker.code) === normalizedCode) || null;
+    const sticker = stickers.find((item) => item.album_id === albumId && normalizeStickerCode(item.code) === normalizedCode);
+    return sticker ? hydrateSticker(sticker) : null;
   },
 
   async incrementSticker(albumId: string, code: string): Promise<Sticker> {
@@ -306,6 +325,7 @@ export const collectionStore = {
     if (patch.notes !== undefined) payload.notes = patch.notes.trim();
     if (patch.owned !== undefined) payload.owned = patch.owned;
     if (patch.quantity !== undefined) payload.quantity = patch.quantity;
+    if (patch.is_stuck !== undefined) payload.is_stuck = patch.is_stuck;
     if (patch.wishlisted !== undefined) payload.wishlisted = patch.wishlisted;
 
     if (isSupabaseConfigured) {
@@ -324,6 +344,7 @@ export const collectionStore = {
             ...payload,
             owned: payload.owned ?? sticker.owned,
             quantity: payload.quantity ?? sticker.quantity,
+            is_stuck: payload.is_stuck ?? Boolean(sticker.is_stuck),
             wishlisted: payload.wishlisted ?? sticker.wishlisted,
             updated_at: now(),
           }

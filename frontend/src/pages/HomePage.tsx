@@ -10,8 +10,8 @@ declare global {
   }
 }
 
-type StickerFilter = 'all' | 'owned' | 'missing' | 'duplicates' | 'wishlist';
-type ViewMode = 'scan' | 'catalog' | 'trades';
+type StickerFilter = 'all' | 'owned' | 'missing' | 'duplicates' | 'stuck' | 'wishlist';
+type ViewMode = 'scan' | 'teams' | 'catalog' | 'trades';
 
 const emptyAlbumForm = {
   name: '',
@@ -38,6 +38,7 @@ const emptyGeneratorForm = {
 function getStats(album: Album | undefined, stickers: Sticker[]): CollectionStats {
   const owned = stickers.filter((sticker) => sticker.quantity > 0).length;
   const duplicates = stickers.reduce((sum, sticker) => sum + Math.max(sticker.quantity - 1, 0), 0);
+  const stuck = stickers.filter((sticker) => sticker.is_stuck).length;
   const wishlisted = stickers.filter((sticker) => sticker.wishlisted).length;
   const total = Math.max(album?.total_stickers || 0, stickers.length);
   const missing = Math.max(total - owned, 0);
@@ -47,6 +48,7 @@ function getStats(album: Album | undefined, stickers: Sticker[]): CollectionStat
     owned,
     missing,
     duplicates,
+    stuck,
     wishlisted,
     totalRegistered: stickers.length,
     completion,
@@ -86,6 +88,28 @@ function HomePage() {
   const selectedAlbum = albums.find((album) => album.id === selectedAlbumId);
   const stats = useMemo(() => getStats(selectedAlbum, stickers), [selectedAlbum, stickers]);
   const duplicates = useMemo(() => stickers.filter((sticker) => sticker.quantity > 1), [stickers]);
+  const [selectedTeam, setSelectedTeam] = useState('');
+  const teams = useMemo(() => {
+    const byTeam = new Map<string, Sticker[]>();
+    stickers.forEach((sticker) => {
+      const team = sticker.section || 'Sem time';
+      byTeam.set(team, [...(byTeam.get(team) || []), sticker]);
+    });
+    return Array.from(byTeam.entries())
+      .map(([name, items]) => ({
+        name,
+        total: items.length,
+        owned: items.filter((sticker) => sticker.quantity > 0).length,
+        stuck: items.filter((sticker) => sticker.is_stuck).length,
+        duplicates: items.reduce((sum, sticker) => sum + Math.max(sticker.quantity - 1, 0), 0),
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [stickers]);
+  const activeTeam = selectedTeam || teams[0]?.name || '';
+  const teamStickers = useMemo(
+    () => stickers.filter((sticker) => (sticker.section || 'Sem time') === activeTeam),
+    [activeTeam, stickers]
+  );
 
   const filteredStickers = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
@@ -103,6 +127,7 @@ function HomePage() {
         (filter === 'owned' && sticker.quantity > 0) ||
         (filter === 'missing' && sticker.quantity === 0) ||
         (filter === 'duplicates' && sticker.quantity > 1) ||
+        (filter === 'stuck' && sticker.is_stuck) ||
         (filter === 'wishlist' && sticker.wishlisted);
 
       return matchesQuery && matchesFilter;
@@ -145,6 +170,7 @@ function HomePage() {
     }
 
     setLastScan(null);
+    setSelectedTeam('');
     stopCamera();
     loadStickers();
   }, [selectedAlbumId]);
@@ -359,10 +385,11 @@ function HomePage() {
           </div>
 
           {selectedAlbum && (
-            <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
               <Metric label="Completude" value={`${stats.completion}%`} />
               <Metric label="Tenho" value={`${stats.owned}/${Math.max(selectedAlbum.total_stickers, stats.totalRegistered)}`} />
               <Metric label="Faltam" value={String(stats.missing)} />
+              <Metric label="Coladas" value={String(stats.stuck)} />
               <Metric label="Para troca" value={String(stats.duplicates)} />
               <Metric label="Desejadas" value={String(stats.wishlisted)} />
             </section>
@@ -434,8 +461,9 @@ function HomePage() {
                   {selectedAlbum ? `${stats.totalRegistered} figurinhas no catalogo` : 'Crie ou selecione um album.'}
                 </p>
               </div>
-              <div className="grid grid-cols-3 rounded-md border border-zinc-200 bg-zinc-50 p-1 text-sm">
+              <div className="grid grid-cols-4 rounded-md border border-zinc-200 bg-zinc-50 p-1 text-sm">
                 <ViewButton active={viewMode === 'scan'} label="Leitor" onClick={() => setViewMode('scan')} />
+                <ViewButton active={viewMode === 'teams'} label="Times" onClick={() => setViewMode('teams')} />
                 <ViewButton active={viewMode === 'catalog'} label="Catalogo" onClick={() => setViewMode('catalog')} />
                 <ViewButton active={viewMode === 'trades'} label="Trocas" onClick={() => setViewMode('trades')} />
               </div>
@@ -482,6 +510,59 @@ function HomePage() {
               </div>
 
               <ScanResultCard lastScan={lastScan} />
+            </section>
+          )}
+
+          {viewMode === 'teams' && selectedAlbum && (
+            <section className="grid gap-4 xl:grid-cols-[280px_1fr]">
+              <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
+                <div className="mb-3 flex items-center justify-between">
+                  <h2 className="text-base font-semibold">Times</h2>
+                  <span className="text-sm text-zinc-500">{teams.length}</span>
+                </div>
+                {teams.length === 0 ? (
+                  <EmptyState title="Sem times" description="Adicione figurinhas com o campo Secao preenchido pelo time." />
+                ) : (
+                  <div className="space-y-2">
+                    {teams.map((team) => (
+                      <button
+                        className={`w-full rounded-md border p-3 text-left transition ${
+                          activeTeam === team.name ? 'border-emerald-500 bg-emerald-50' : 'border-zinc-200 hover:border-zinc-300'
+                        }`}
+                        key={team.name}
+                        onClick={() => setSelectedTeam(team.name)}
+                        type="button"
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="font-medium">{team.name}</p>
+                            <p className="text-sm text-zinc-500">{team.owned}/{team.total} tenho - {team.stuck} coladas</p>
+                          </div>
+                          {team.duplicates > 0 && (
+                            <span className="rounded-full bg-sky-100 px-2 py-1 text-xs font-semibold text-sky-800">{team.duplicates}</span>
+                          )}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section className="rounded-lg border border-zinc-200 bg-white shadow-sm">
+                <div className="border-b border-zinc-200 px-4 py-3">
+                  <h2 className="text-base font-semibold">{activeTeam || 'Time'}</h2>
+                  <p className="text-sm text-zinc-500">Marque se ja tem, se ja colou e ajuste repetidas.</p>
+                </div>
+                {teamStickers.length === 0 ? (
+                  <EmptyState title="Sem figurinhas neste time" description="Use o catalogo para cadastrar as figurinhas por time." />
+                ) : (
+                  <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3">
+                    {teamStickers.map((sticker) => (
+                      <TeamStickerCard key={sticker.id} onPatch={(patch) => patchSticker(sticker, patch)} sticker={sticker} />
+                    ))}
+                  </div>
+                )}
+              </section>
             </section>
           )}
 
@@ -623,6 +704,7 @@ function CatalogToolbar({
           <option value="owned">Tenho</option>
           <option value="missing">Faltando</option>
           <option value="duplicates">Repetidas</option>
+          <option value="stuck">Coladas</option>
           <option value="wishlist">Desejadas</option>
         </select>
       </div>
@@ -646,7 +728,7 @@ function ScanResultCard({ lastScan }: { lastScan: Sticker | null }) {
           <p className="text-sm text-emerald-800">{lastScan.section || 'Sem secao'}</p>
           <div className="mt-4 grid grid-cols-2 gap-3">
             <Metric label="Quantidade" value={String(lastScan.quantity)} />
-            <Metric label="Troca" value={String(Math.max(lastScan.quantity - 1, 0))} />
+            <Metric label="Colada" value={lastScan.is_stuck ? 'Sim' : 'Nao'} />
           </div>
         </div>
       )}
@@ -665,11 +747,12 @@ function StickerTable({
 }) {
   return (
     <section className="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
-      <div className="grid grid-cols-[110px_1fr_120px_150px_110px] gap-3 border-b border-zinc-200 bg-zinc-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-zinc-500 max-lg:hidden">
+      <div className="grid grid-cols-[110px_1fr_120px_150px_120px_90px] gap-3 border-b border-zinc-200 bg-zinc-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-zinc-500 max-lg:hidden">
         <span>Codigo</span>
         <span>Figurinha</span>
         <span>Status</span>
         <span>Quantidade</span>
+        <span>Colada</span>
         <span>Desejo</span>
       </div>
       {loading ? (
@@ -735,11 +818,76 @@ function EmptyState({ description, title }: { description: string; title: string
   );
 }
 
+function TeamStickerCard({ onPatch, sticker }: { onPatch: (patch: StickerPatch) => void; sticker: Sticker }) {
+  const isOwned = sticker.quantity > 0;
+  const canStick = isOwned || sticker.is_stuck;
+
+  return (
+    <article className={`rounded-lg border p-4 ${sticker.is_stuck ? 'border-emerald-300 bg-emerald-50' : 'border-zinc-200 bg-white'}`}>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="font-mono text-sm font-semibold text-zinc-900">{sticker.code}</p>
+          <h3 className="font-medium text-zinc-950">{sticker.title}</h3>
+        </div>
+        <span className={`rounded-full px-2 py-1 text-xs font-semibold ${isOwned ? 'bg-emerald-100 text-emerald-800' : 'bg-zinc-100 text-zinc-700'}`}>
+          {isOwned ? 'Tenho' : 'Falta'}
+        </span>
+      </div>
+
+      <div className="mt-4 grid grid-cols-2 gap-2">
+        <button
+          className={`rounded-md border px-3 py-2 text-sm font-medium ${
+            isOwned ? 'border-emerald-300 bg-emerald-100 text-emerald-800' : 'border-zinc-300 hover:bg-zinc-50'
+          }`}
+          onClick={() => onPatch({ quantity: isOwned ? 0 : 1, owned: !isOwned, is_stuck: isOwned ? false : sticker.is_stuck })}
+          type="button"
+        >
+          {isOwned ? 'Tenho' : 'Marcar tenho'}
+        </button>
+        <button
+          className={`rounded-md border px-3 py-2 text-sm font-medium ${
+            sticker.is_stuck ? 'border-emerald-500 bg-emerald-600 text-white' : 'border-zinc-300 hover:bg-zinc-50'
+          }`}
+          disabled={!canStick}
+          onClick={() => onPatch({ is_stuck: !sticker.is_stuck, quantity: sticker.quantity || 1, owned: true, wishlisted: false })}
+          type="button"
+        >
+          {sticker.is_stuck ? 'Colada' : 'Colar'}
+        </button>
+      </div>
+
+      <div className="mt-3 flex items-center justify-between rounded-md bg-zinc-50 px-3 py-2">
+        <span className="text-sm text-zinc-600">Quantidade</span>
+        <div className="flex items-center gap-2">
+          <button
+            aria-label="Diminuir quantidade"
+            className="grid h-8 w-8 place-items-center rounded-md border border-zinc-300 text-lg leading-none hover:bg-white"
+            onClick={() => onPatch({ quantity: Math.max(sticker.quantity - 1, 0), owned: sticker.quantity - 1 > 0, is_stuck: sticker.quantity - 1 > 0 ? sticker.is_stuck : false })}
+            type="button"
+          >
+            -
+          </button>
+          <span className="w-8 text-center font-medium">{sticker.quantity}</span>
+          <button
+            aria-label="Aumentar quantidade"
+            className="grid h-8 w-8 place-items-center rounded-md border border-zinc-300 text-lg leading-none hover:bg-white"
+            onClick={() => onPatch({ quantity: sticker.quantity + 1, owned: true, wishlisted: false })}
+            type="button"
+          >
+            +
+          </button>
+        </div>
+      </div>
+      {sticker.quantity > 1 && <p className="mt-2 text-sm font-medium text-sky-700">{sticker.quantity - 1} para troca</p>}
+    </article>
+  );
+}
+
 function StickerRow({ onPatch, sticker }: { onPatch: (patch: StickerPatch) => void; sticker: Sticker }) {
   const isOwned = sticker.quantity > 0;
 
   return (
-    <article className="grid gap-3 px-4 py-4 lg:grid-cols-[110px_1fr_120px_150px_110px] lg:items-center">
+    <article className="grid gap-3 px-4 py-4 lg:grid-cols-[110px_1fr_120px_150px_120px_90px] lg:items-center">
       <div>
         <p className="text-xs font-semibold uppercase text-zinc-500 lg:hidden">Codigo</p>
         <p className="font-mono text-sm font-semibold text-zinc-900">{sticker.code}</p>
@@ -757,7 +905,7 @@ function StickerRow({ onPatch, sticker }: { onPatch: (patch: StickerPatch) => vo
         <button
           aria-label="Diminuir quantidade"
           className="grid h-8 w-8 place-items-center rounded-md border border-zinc-300 text-lg leading-none hover:bg-zinc-50"
-          onClick={() => onPatch({ quantity: Math.max(sticker.quantity - 1, 0), owned: sticker.quantity - 1 > 0 })}
+          onClick={() => onPatch({ quantity: Math.max(sticker.quantity - 1, 0), owned: sticker.quantity - 1 > 0, is_stuck: sticker.quantity - 1 > 0 ? sticker.is_stuck : false })}
           type="button"
         >
           -
@@ -772,6 +920,18 @@ function StickerRow({ onPatch, sticker }: { onPatch: (patch: StickerPatch) => vo
           +
         </button>
         {sticker.quantity > 1 && <span className="rounded-full bg-sky-100 px-2 py-1 text-xs font-semibold text-sky-800">troca</span>}
+      </div>
+      <div>
+        <button
+          className={`rounded-md border px-3 py-2 text-sm font-medium ${
+            sticker.is_stuck ? 'border-emerald-500 bg-emerald-600 text-white' : 'border-zinc-300 hover:bg-zinc-50'
+          }`}
+          disabled={!isOwned && !sticker.is_stuck}
+          onClick={() => onPatch({ is_stuck: !sticker.is_stuck, quantity: sticker.quantity || 1, owned: true, wishlisted: false })}
+          type="button"
+        >
+          {sticker.is_stuck ? 'Colada' : 'Colar'}
+        </button>
       </div>
       <div>
         <button

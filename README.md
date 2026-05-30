@@ -8,9 +8,10 @@ O frontend e estatico, feito em React + TypeScript, e pode ser hospedado no GitH
 
 - Cadastro de albuns com editora, temporada, capa e total de figurinhas.
 - Catalogo de figurinhas por album, com cadastro manual ou geracao de sequencia.
+- Tela por times/secoes para marcar rapidamente cada figurinha.
 - Leitor de camera para codigos de barras/QR via `BarcodeDetector`, com campo manual de fallback.
 - Registro de figurinha lida com incremento automatico de quantidade (`+1`).
-- Controle de figurinhas que voce tem, faltantes, repetidas e desejadas.
+- Controle de figurinhas que voce tem, faltantes, coladas, repetidas e desejadas.
 - Area de trocas baseada nas repetidas (`quantidade > 1`).
 - Busca por codigo, titulo ou secao.
 - Indicadores de completude, faltantes, repetidas e wishlist.
@@ -20,9 +21,10 @@ O frontend e estatico, feito em React + TypeScript, e pode ser hospedado no GitH
 
 1. Crie ou selecione um album.
 2. Monte o catalogo do album na aba `Catalogo`.
-3. Use a aba `Leitor` para abrir a camera ou digitar o codigo.
-4. Quando a figurinha e encontrada no catalogo, a quantidade aumenta em 1.
-5. Figurinhas com quantidade maior que 1 aparecem na aba `Trocas`.
+3. Use a aba `Times` para abrir um time/secao e marcar se voce tem a figurinha, se ja colou e quantas repetidas existem.
+4. Use a aba `Leitor` para abrir a camera ou digitar o codigo.
+5. Quando a figurinha e encontrada no catalogo, a quantidade aumenta em 1.
+6. Figurinhas com quantidade maior que 1 aparecem na aba `Trocas`.
 
 ## Desenvolvimento
 
