@@ -62,6 +62,13 @@ O schema atual usa Supabase Auth e RLS para limitar albuns aos donos e colaborad
 
 No Supabase, habilite o provider `Email` em Authentication e rode novamente `supabase/schema.sql` para criar `album_members`, `owner_id`, a funcao de aceite de magic link e as policies.
 
+Em `Authentication > URL Configuration`, configure:
+
+- `Site URL`: `https://josercf.github.io/stickershelf/`
+- `Redirect URLs`: `https://josercf.github.io/stickershelf/*`
+
+Para desenvolvimento local, adicione tambem `http://localhost:3000/*` se for usar `npm start`.
+
 Para conectar o site publicado, configure os secrets do GitHub:
 
 ```bash

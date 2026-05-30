@@ -116,6 +116,29 @@ function writeSession(session: AuthSession | null) {
   return session;
 }
 
+function getCleanRedirectUrl() {
+  const url = new URL(window.location.href);
+  url.hash = '';
+  return url.toString();
+}
+
+async function getAuthUser(accessToken: string): Promise<AuthSession['user']> {
+  const response = await fetch(`${supabaseAuthUrl}/user`, {
+    headers: {
+      apikey: supabaseAnonKey,
+      Authorization: `Bearer ${accessToken}`,
+      'Content-Type': 'application/json',
+    },
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(detail || 'Nao foi possivel carregar o usuario autenticado.');
+  }
+
+  return response.json() as Promise<AuthSession['user']>;
+}
+
 function getSessionIdentityFilters(session: AuthSession) {
   const values = [
     session.user.email,
@@ -218,11 +241,35 @@ export const collectionStore = {
     return readSession();
   },
 
+  async consumeAuthRedirect(): Promise<AuthSession | null> {
+    if (!isSupabaseConfigured || !window.location.hash.includes('access_token=')) {
+      return null;
+    }
+
+    const hashParams = new URLSearchParams(window.location.hash.slice(1));
+    const accessToken = hashParams.get('access_token');
+    if (!accessToken) return null;
+
+    const refreshToken = hashParams.get('refresh_token') || undefined;
+    const expiresIn = Number(hashParams.get('expires_in') || 0);
+    const user = await getAuthUser(accessToken);
+    const session = writeSession({
+      access_token: accessToken,
+      refresh_token: refreshToken,
+      expires_at: expiresIn ? Math.floor(Date.now() / 1000) + expiresIn : undefined,
+      user,
+    }) as AuthSession;
+
+    window.history.replaceState({}, document.title, `${window.location.pathname}${window.location.search}`);
+    return session;
+  },
+
   async requestLogin(email: string): Promise<void> {
     if (!isSupabaseConfigured) {
       throw new Error('Configure o Supabase para usar login.');
     }
-    await supabaseAuthRequest('otp', {
+    const redirectTo = encodeURIComponent(getCleanRedirectUrl());
+    await supabaseAuthRequest(`otp?redirect_to=${redirectTo}`, {
       method: 'POST',
       body: JSON.stringify({
         email: email.trim().toLowerCase(),

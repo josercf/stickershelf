@@ -167,6 +167,23 @@ function HomePage() {
   }
 
   useEffect(() => {
+    async function consumeAuthRedirect() {
+      try {
+        const nextSession = await collectionStore.consumeAuthRedirect();
+        if (nextSession?.access_token) {
+          setSession(nextSession);
+          setLoginForm(emptyLoginForm);
+          setLoginStep('email');
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Nao foi possivel concluir o login pelo link.');
+      }
+    }
+
+    consumeAuthRedirect();
+  }, []);
+
+  useEffect(() => {
     loadAlbums();
   }, [session?.access_token]);
 
