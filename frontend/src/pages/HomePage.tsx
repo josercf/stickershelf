@@ -1,6 +1,7 @@
 import React, { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Album, CatalogStickerInput, CollectionStats, Sticker, StickerPatch } from '../types/collection';
 import { collectionStore, isSupabaseConfigured, normalizeStickerCode } from '../services/collectionStore';
+import { buildPaniniWorldCup2026Catalog, paniniWorldCup2026Album } from '../data/paniniWorldCup2026';
 
 declare global {
   interface Window {
@@ -203,6 +204,22 @@ function HomePage() {
     }
   }
 
+  async function handleImportPaniniWorldCup2026() {
+    try {
+      setSaving(true);
+      setError('');
+      const album = await collectionStore.createAlbum(paniniWorldCup2026Album);
+      await collectionStore.createCatalog(album.id, buildPaniniWorldCup2026Catalog());
+      setAlbums((current) => [album, ...current]);
+      setSelectedAlbumId(album.id);
+      setViewMode('teams');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Nao foi possivel importar o catalogo Panini.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function handleCreateCatalogSticker(event: FormEvent) {
     event.preventDefault();
     if (!selectedAlbumId) {
@@ -370,23 +387,23 @@ function HomePage() {
   }
 
   return (
-    <main className="min-h-screen bg-zinc-50 text-zinc-950">
-      <header className="border-b border-zinc-200 bg-white">
+    <main className="min-h-screen bg-slate-100 text-zinc-950">
+      <header className="border-b border-slate-200 bg-emerald-950 text-white">
         <div className="mx-auto flex max-w-7xl flex-col gap-5 px-4 py-5 sm:px-6 lg:px-8">
           <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
             <div>
-              <p className="text-sm font-medium text-emerald-700">Catalogo e trocas</p>
-              <h1 className="text-3xl font-semibold tracking-normal text-zinc-950">StickerShelf</h1>
+              <p className="text-sm font-medium text-emerald-100">Album de figurinhas</p>
+              <h1 className="text-3xl font-semibold tracking-normal text-white">StickerShelf</h1>
             </div>
-            <div className="flex items-center gap-2 rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm text-zinc-600">
-              <span className={`h-2.5 w-2.5 rounded-full ${isSupabaseConfigured ? 'bg-emerald-500' : 'bg-amber-500'}`} />
+            <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-white/70 px-3 py-2 text-sm text-zinc-700">
+              <span className={`h-2.5 w-2.5 rounded-full ${isSupabaseConfigured ? 'bg-emerald-500' : 'bg-emerald-500'}`} />
               {isSupabaseConfigured ? 'Supabase conectado' : 'Modo local sem Supabase'}
             </div>
           </div>
 
           {selectedAlbum && (
             <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
-              <Metric label="Completude" value={`${stats.completion}%`} />
+              <Metric label="Album" value={`${stats.completion}%`} />
               <Metric label="Tenho" value={`${stats.owned}/${Math.max(selectedAlbum.total_stickers, stats.totalRegistered)}`} />
               <Metric label="Faltam" value={String(stats.missing)} />
               <Metric label="Coladas" value={String(stats.stuck)} />
@@ -399,7 +416,7 @@ function HomePage() {
 
       <div className="mx-auto grid max-w-7xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[320px_1fr] lg:px-8">
         <aside className="space-y-4">
-          <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
+          <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-base font-semibold">Albuns</h2>
               <span className="text-sm text-zinc-500">{albums.length}</span>
@@ -409,8 +426,8 @@ function HomePage() {
                 <button
                   className={`w-full rounded-md border p-3 text-left transition ${
                     album.id === selectedAlbumId
-                      ? 'border-emerald-500 bg-emerald-50'
-                      : 'border-zinc-200 bg-white hover:border-zinc-300'
+                      ? 'border-emerald-600 bg-emerald-50'
+                      : 'border-slate-200 bg-white hover:border-emerald-500'
                   }`}
                   key={album.id}
                   onClick={() => setSelectedAlbumId(album.id)}
@@ -430,7 +447,22 @@ function HomePage() {
             </div>
           </section>
 
-          <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
+          <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <h2 className="mb-3 text-base font-semibold">Catalogos prontos</h2>
+            <button
+              className="w-full rounded-md bg-emerald-700 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-800"
+              disabled={saving}
+              onClick={handleImportPaniniWorldCup2026}
+              type="button"
+            >
+              Importar Panini Copa 2026
+            </button>
+            <p className="mt-2 text-xs leading-5 text-zinc-600">
+              Cria 980 posicoes: introducao/FWC e 48 selecoes com 20 figurinhas por time.
+            </p>
+          </section>
+
+          <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
             <h2 className="mb-3 text-base font-semibold">Novo album</h2>
             <form className="space-y-3" onSubmit={handleCreateAlbum}>
               <TextField label="Nome" value={albumForm.name} onChange={(name) => setAlbumForm({ ...albumForm, name })} />
@@ -647,7 +679,7 @@ function AlbumCover({ album }: { album: Album }) {
   }
 
   return (
-    <div className="grid h-12 w-12 place-items-center rounded-md bg-emerald-100 text-sm font-semibold text-emerald-800">
+    <div className="grid h-12 w-12 place-items-center rounded-md bg-emerald-100 text-sm font-semibold text-emerald-900">
       {initials(album.name) || 'AL'}
     </div>
   );
@@ -655,7 +687,7 @@ function AlbumCover({ album }: { album: Album }) {
 
 function Metric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3">
+    <div className="rounded-lg border border-slate-200 bg-white/70 px-4 py-3">
       <p className="text-sm text-zinc-500">{label}</p>
       <p className="text-2xl font-semibold text-zinc-950">{value}</p>
     </div>
@@ -722,10 +754,8 @@ function ScanResultCard({ lastScan }: { lastScan: Sticker | null }) {
           <p className="mt-1 text-sm text-zinc-500">A leitura valida aparece aqui.</p>
         </div>
       ) : (
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4">
-          <p className="font-mono text-sm font-semibold text-emerald-900">{lastScan.code}</p>
-          <h3 className="mt-1 text-lg font-semibold text-emerald-950">{lastScan.title}</h3>
-          <p className="text-sm text-emerald-800">{lastScan.section || 'Sem secao'}</p>
+        <div className="rounded-lg border border-slate-200 bg-white p-4">
+          <StickerVisual sticker={lastScan} />
           <div className="mt-4 grid grid-cols-2 gap-3">
             <Metric label="Quantidade" value={String(lastScan.quantity)} />
             <Metric label="Colada" value={lastScan.is_stuck ? 'Sim' : 'Nao'} />
@@ -818,21 +848,47 @@ function EmptyState({ description, title }: { description: string; title: string
   );
 }
 
+function StickerVisual({ compact = false, sticker }: { compact?: boolean; sticker: Sticker }) {
+  const initialsText = initials(sticker.section || sticker.title || sticker.code);
+  const extraCount = Math.max(sticker.quantity - 1, 0);
+
+  return (
+    <div className={`relative mx-auto w-full max-w-[190px] rounded-[6px] border border-zinc-300 bg-white p-2 shadow-sm ${compact ? 'max-w-[150px]' : ''}`}>
+      <div className="aspect-[3/4] overflow-hidden rounded-[4px] border border-zinc-200 bg-gradient-to-b from-[#f8f5eb] to-[#e2d6bd]">
+        {sticker.image_url ? (
+          <img alt="" className="h-full w-full object-cover" src={sticker.image_url} />
+        ) : (
+          <div className="flex h-full flex-col items-center justify-center gap-3 px-3 text-center">
+            <div className="grid h-14 w-14 place-items-center rounded-full border border-slate-200 bg-white/80 text-lg font-bold text-emerald-900">
+              {initialsText || 'SS'}
+            </div>
+            <div>
+              <p className="font-mono text-xs font-semibold text-zinc-600">{sticker.code}</p>
+              <p className="mt-1 text-sm font-semibold leading-tight text-zinc-900">{sticker.title}</p>
+            </div>
+          </div>
+        )}
+      </div>
+      <div className="mt-2 flex items-center justify-between gap-2">
+        <span className="truncate text-xs font-medium text-zinc-700">{sticker.section || 'Sem time'}</span>
+        <span className="font-mono text-xs font-semibold text-zinc-500">{sticker.code}</span>
+      </div>
+      <div className="mt-2 flex flex-wrap gap-1">
+        {sticker.quantity > 0 && <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[11px] font-semibold text-emerald-800">tenho</span>}
+        {sticker.is_stuck && <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-semibold text-emerald-900">colada</span>}
+        {extraCount > 0 && <span className="rounded bg-sky-100 px-1.5 py-0.5 text-[11px] font-semibold text-sky-800">+{extraCount}</span>}
+      </div>
+    </div>
+  );
+}
+
 function TeamStickerCard({ onPatch, sticker }: { onPatch: (patch: StickerPatch) => void; sticker: Sticker }) {
   const isOwned = sticker.quantity > 0;
   const canStick = isOwned || sticker.is_stuck;
 
   return (
-    <article className={`rounded-lg border p-4 ${sticker.is_stuck ? 'border-emerald-300 bg-emerald-50' : 'border-zinc-200 bg-white'}`}>
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="font-mono text-sm font-semibold text-zinc-900">{sticker.code}</p>
-          <h3 className="font-medium text-zinc-950">{sticker.title}</h3>
-        </div>
-        <span className={`rounded-full px-2 py-1 text-xs font-semibold ${isOwned ? 'bg-emerald-100 text-emerald-800' : 'bg-zinc-100 text-zinc-700'}`}>
-          {isOwned ? 'Tenho' : 'Falta'}
-        </span>
-      </div>
+    <article className={`rounded-lg border p-4 ${sticker.is_stuck ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 bg-white'}`}>
+      <StickerVisual sticker={sticker} />
 
       <div className="mt-4 grid grid-cols-2 gap-2">
         <button
@@ -856,7 +912,7 @@ function TeamStickerCard({ onPatch, sticker }: { onPatch: (patch: StickerPatch) 
         </button>
       </div>
 
-      <div className="mt-3 flex items-center justify-between rounded-md bg-zinc-50 px-3 py-2">
+      <div className="mt-3 flex items-center justify-between rounded-md bg-white/80 px-3 py-2">
         <span className="text-sm text-zinc-600">Quantidade</span>
         <div className="flex items-center gap-2">
           <button
@@ -893,8 +949,15 @@ function StickerRow({ onPatch, sticker }: { onPatch: (patch: StickerPatch) => vo
         <p className="font-mono text-sm font-semibold text-zinc-900">{sticker.code}</p>
       </div>
       <div className="min-w-0">
-        <p className="font-medium text-zinc-950">{sticker.title}</p>
-        <p className="text-sm text-zinc-500">{sticker.section || 'Sem secao'}</p>
+        <div className="flex items-center gap-3">
+          <div className="w-16 shrink-0">
+            <StickerVisual compact sticker={sticker} />
+          </div>
+          <div className="min-w-0">
+            <p className="font-medium text-zinc-950">{sticker.title}</p>
+            <p className="text-sm text-zinc-500">{sticker.section || 'Sem secao'}</p>
+          </div>
+        </div>
       </div>
       <div>
         <span className={`rounded-full px-3 py-1 text-xs font-semibold ${isOwned ? 'bg-emerald-100 text-emerald-800' : 'bg-zinc-100 text-zinc-700'}`}>

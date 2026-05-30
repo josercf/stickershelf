@@ -16,6 +16,7 @@ O frontend e estatico, feito em React + TypeScript, e pode ser hospedado no GitH
 - Busca por codigo, titulo ou secao.
 - Indicadores de completude, faltantes, repetidas e wishlist.
 - Modo local de demonstracao quando o Supabase ainda nao esta configurado.
+- Importador inicial do catalogo Panini FIFA World Cup 2026 com 980 posicoes.
 
 ## Fluxo principal
 
@@ -54,6 +55,24 @@ REACT_APP_SUPABASE_ANON_KEY=your-anon-key
 ```
 
 O schema atual usa politicas publicas de leitura e escrita para simplificar o primeiro prototipo hospedado no GitHub Pages. Para uso real com dados privados, o proximo passo e adicionar autenticacao Supabase e restringir as policies por usuario.
+
+Para conectar o site publicado, configure os secrets do GitHub:
+
+```bash
+gh secret set REACT_APP_SUPABASE_URL --repo josercf/stickershelf
+gh secret set REACT_APP_SUPABASE_ANON_KEY --repo josercf/stickershelf
+```
+
+Depois rode novamente o workflow de deploy.
+
+## Catalogo Panini
+
+O importador `Panini Copa 2026` usa informacoes publicas sobre a estrutura do album: 980 figurinhas, 1 `PANINI`, 19 `FWC` e 48 selecoes com 20 figurinhas por time. As figurinhas sao renderizadas como placeholders de album; o app nao copia imagens proprietarias da Panini.
+
+Fontes consultadas:
+
+- Panini: `https://www.paninigroup.com/en/wc26pack-contents`
+- Scanini checklist: `https://scanini.app/albums/world-cup-2026`
 
 ## GitHub Pages
 
