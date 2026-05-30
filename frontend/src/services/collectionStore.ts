@@ -258,29 +258,35 @@ export const collectionStore = {
     return session;
   },
 
-  async requestLogin(email: string): Promise<void> {
+  async loginWithPassword(email: string, password: string): Promise<AuthSession> {
     if (!isSupabaseConfigured) {
       throw new Error('Configure o Supabase para usar login.');
     }
-    await supabaseAuthRequest('otp', {
+    const session = await supabaseAuthRequest<AuthSession>('token?grant_type=password', {
       method: 'POST',
       body: JSON.stringify({
         email: email.trim().toLowerCase(),
-        create_user: true,
-      }),
-    });
-  },
-
-  async verifyLogin(email: string, token: string): Promise<AuthSession> {
-    const session = await supabaseAuthRequest<AuthSession>('verify', {
-      method: 'POST',
-      body: JSON.stringify({
-        email: email.trim().toLowerCase(),
-        token: token.trim(),
-        type: 'email',
+        password,
       }),
     });
     return writeSession(session) as AuthSession;
+  },
+
+  async signUp(email: string, password: string): Promise<AuthSession | 'confirmation-sent'> {
+    if (!isSupabaseConfigured) {
+      throw new Error('Configure o Supabase para usar login.');
+    }
+    const result = await supabaseAuthRequest<AuthSession & { id?: string }>('signup', {
+      method: 'POST',
+      body: JSON.stringify({
+        email: email.trim().toLowerCase(),
+        password,
+      }),
+    });
+    if (result.access_token) {
+      return writeSession(result) as AuthSession;
+    }
+    return 'confirmation-sent';
   },
 
   signOut(): void {

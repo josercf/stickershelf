@@ -18,7 +18,7 @@ type MobileTab = 'home' | ViewMode;
 const emptyAlbumForm = { name: '', publisher: '', season: '', cover_url: '', total_stickers: 100 };
 const emptyCatalogForm = { code: '', title: '', section: '' };
 const emptyGeneratorForm = { prefix: '', start: 1, count: 20, padding: 3, section: '' };
-const emptyLoginForm = { email: '', token: '' };
+const emptyLoginForm = { email: '', password: '' };
 const emptyInviteForm: { type: InviteType; value: string } = { type: 'email', value: '' };
 
 function getStats(album: Album | undefined, stickers: Sticker[]): CollectionStats {
@@ -519,7 +519,8 @@ function HomePage() {
   const [inviteLink, setInviteLink] = useState('');
   const [session, setSession] = useState<AuthSession | null>(() => collectionStore.getSession());
   const [members, setMembers] = useState<AlbumMember[]>([]);
-  const [loginStep, setLoginStep] = useState<'email' | 'token'>('email');
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [registerConfirmSent, setRegisterConfirmSent] = useState(false);
   const [lastScan, setLastScan] = useState<Sticker | null>(null);
   const [filter, setFilter] = useState<StickerFilter>('all');
   const [query, setQuery] = useState('');
@@ -586,7 +587,7 @@ function HomePage() {
     async function consumeAuthRedirect() {
       try {
         const next = await collectionStore.consumeAuthRedirect();
-        if (next?.access_token) { setSession(next); setLoginForm(emptyLoginForm); setLoginStep('email'); }
+        if (next?.access_token) { setSession(next); setLoginForm(emptyLoginForm); }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Não foi possível concluir o login pelo link.');
       }
@@ -658,23 +659,43 @@ function HomePage() {
     } finally { setSaving(false); }
   }
 
-  async function handleRequestLogin(e: FormEvent) {
+  async function handlePasswordLogin(e: FormEvent) {
     e.preventDefault();
+    if (!loginForm.password) { setError('Informe a senha.'); return; }
     try {
       setSaving(true); setError('');
-      await collectionStore.requestLogin(loginForm.email);
-      setLoginStep('token');
-    } catch (err) { setError(err instanceof Error ? err.message : 'Não foi possível enviar o código de login.');
+      const next = await collectionStore.loginWithPassword(loginForm.email, loginForm.password);
+      setSession(next); setLoginForm(emptyLoginForm);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '';
+      if (msg.includes('Invalid login credentials') || msg.includes('invalid_grant')) {
+        setError('E-mail ou senha incorretos.');
+      } else if (msg.includes('Email not confirmed')) {
+        setError('Confirme seu e-mail antes de entrar. Verifique sua caixa de entrada.');
+      } else {
+        setError(msg || 'Não foi possível fazer login.');
+      }
     } finally { setSaving(false); }
   }
 
-  async function handleVerifyLogin(e: FormEvent) {
+  async function handleSignUp(e: FormEvent) {
     e.preventDefault();
+    if (!loginForm.password || loginForm.password.length < 6) { setError('A senha precisa ter pelo menos 6 caracteres.'); return; }
     try {
       setSaving(true); setError('');
-      const next = await collectionStore.verifyLogin(loginForm.email, loginForm.token);
-      setSession(next); setLoginForm(emptyLoginForm); setLoginStep('email');
-    } catch (err) { setError(err instanceof Error ? err.message : 'Não foi possível confirmar o código.');
+      const result = await collectionStore.signUp(loginForm.email, loginForm.password);
+      if (result === 'confirmation-sent') {
+        setRegisterConfirmSent(true);
+      } else {
+        setSession(result); setLoginForm(emptyLoginForm); setAuthMode('login');
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '';
+      if (msg.includes('already registered') || msg.includes('User already registered')) {
+        setError('Este e-mail já tem uma conta. Tente fazer login.');
+      } else {
+        setError(msg || 'Não foi possível criar a conta.');
+      }
     } finally { setSaving(false); }
   }
 
@@ -893,21 +914,45 @@ function HomePage() {
                     </div>
                     <SecondaryButton full onClick={handleSignOut}>Sair</SecondaryButton>
                   </div>
-                ) : loginStep === 'email' ? (
-                  <form style={{ display: 'flex', flexDirection: 'column', gap: 10 }} onSubmit={handleRequestLogin}>
+                ) : registerConfirmSent ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div style={{ borderRadius: 'var(--radius)', background: 'var(--primary-container)', padding: '12px 14px', fontSize: 14, color: 'var(--on-primary-container)', lineHeight: 1.5 }}>
+                      <strong>Confirme seu e-mail!</strong> Enviamos um link para <strong>{loginForm.email}</strong>. Clique nele para ativar sua conta.
+                    </div>
+                    <SecondaryButton full onClick={() => { setRegisterConfirmSent(false); setAuthMode('login'); }}>
+                      Já confirmei — fazer login
+                    </SecondaryButton>
+                  </div>
+                ) : authMode === 'login' ? (
+                  <form style={{ display: 'flex', flexDirection: 'column', gap: 10 }} onSubmit={handlePasswordLogin}>
                     {pendingInviteToken && (
                       <div style={{ borderRadius: 'var(--radius)', background: 'var(--primary-container)', padding: '10px 14px', fontSize: 13, color: 'var(--on-primary-container)' }}>
                         Entre para aceitar o convite do álbum.
                       </div>
                     )}
                     <TextField label="E-mail" value={loginForm.email} onChange={(email) => setLoginForm({ ...loginForm, email })} />
-                    <PrimaryButton full disabled={saving} icon="send">Enviar código</PrimaryButton>
+                    <TextField label="Senha" type="password" value={loginForm.password} onChange={(password) => setLoginForm({ ...loginForm, password })} />
+                    <PrimaryButton full disabled={saving} icon="login">Entrar</PrimaryButton>
+                    <button
+                      type="button"
+                      onClick={() => { setAuthMode('register'); setError(''); }}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: 'var(--secondary)', textDecoration: 'underline', padding: '4px 0', fontFamily: 'var(--font-body)' }}
+                    >
+                      Criar conta
+                    </button>
                   </form>
                 ) : (
-                  <form style={{ display: 'flex', flexDirection: 'column', gap: 10 }} onSubmit={handleVerifyLogin}>
-                    <TextField label="Código recebido" value={loginForm.token} onChange={(token) => setLoginForm({ ...loginForm, token })} />
-                    <PrimaryButton full disabled={saving} icon="login">Entrar</PrimaryButton>
-                    <SecondaryButton full onClick={() => setLoginStep('email')}>Trocar e-mail</SecondaryButton>
+                  <form style={{ display: 'flex', flexDirection: 'column', gap: 10 }} onSubmit={handleSignUp}>
+                    <TextField label="E-mail" value={loginForm.email} onChange={(email) => setLoginForm({ ...loginForm, email })} />
+                    <TextField label="Senha (mín. 6 caracteres)" type="password" value={loginForm.password} onChange={(password) => setLoginForm({ ...loginForm, password })} />
+                    <PrimaryButton full disabled={saving} icon="person_add">Criar conta</PrimaryButton>
+                    <button
+                      type="button"
+                      onClick={() => { setAuthMode('login'); setError(''); }}
+                      style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: 'var(--secondary)', textDecoration: 'underline', padding: '4px 0', fontFamily: 'var(--font-body)' }}
+                    >
+                      Já tenho conta — fazer login
+                    </button>
                   </form>
                 )}
               </Card>
