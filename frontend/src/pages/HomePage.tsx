@@ -13,67 +13,498 @@ declare global {
 
 type StickerFilter = 'all' | 'owned' | 'missing' | 'duplicates' | 'stuck' | 'wishlist';
 type ViewMode = 'scan' | 'teams' | 'catalog' | 'trades';
+type MobileTab = 'home' | ViewMode;
 
-const emptyAlbumForm = {
-  name: '',
-  publisher: '',
-  season: '',
-  cover_url: '',
-  total_stickers: 100,
-};
-
-const emptyCatalogForm = {
-  code: '',
-  title: '',
-  section: '',
-};
-
-const emptyGeneratorForm = {
-  prefix: '',
-  start: 1,
-  count: 20,
-  padding: 3,
-  section: '',
-};
-
-const emptyLoginForm = {
-  email: '',
-  token: '',
-};
-
-const emptyInviteForm: { type: InviteType; value: string } = {
-  type: 'email',
-  value: '',
-};
+const emptyAlbumForm = { name: '', publisher: '', season: '', cover_url: '', total_stickers: 100 };
+const emptyCatalogForm = { code: '', title: '', section: '' };
+const emptyGeneratorForm = { prefix: '', start: 1, count: 20, padding: 3, section: '' };
+const emptyLoginForm = { email: '', token: '' };
+const emptyInviteForm: { type: InviteType; value: string } = { type: 'email', value: '' };
 
 function getStats(album: Album | undefined, stickers: Sticker[]): CollectionStats {
-  const owned = stickers.filter((sticker) => sticker.quantity > 0).length;
-  const duplicates = stickers.reduce((sum, sticker) => sum + Math.max(sticker.quantity - 1, 0), 0);
-  const stuck = stickers.filter((sticker) => sticker.is_stuck).length;
-  const wishlisted = stickers.filter((sticker) => sticker.wishlisted).length;
+  const owned = stickers.filter((s) => s.quantity > 0).length;
+  const duplicates = stickers.reduce((sum, s) => sum + Math.max(s.quantity - 1, 0), 0);
+  const stuck = stickers.filter((s) => s.is_stuck).length;
+  const wishlisted = stickers.filter((s) => s.wishlisted).length;
   const total = Math.max(album?.total_stickers || 0, stickers.length);
   const missing = Math.max(total - owned, 0);
   const completion = total ? Math.round((owned / total) * 100) : 0;
-
-  return {
-    owned,
-    missing,
-    duplicates,
-    stuck,
-    wishlisted,
-    totalRegistered: stickers.length,
-    completion,
-  };
+  return { owned, missing, duplicates, stuck, wishlisted, totalRegistered: stickers.length, completion };
 }
 
 function initials(value: string) {
-  return value
-    .split(' ')
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase())
-    .join('');
+  return value.split(' ').filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase()).join('');
 }
+
+/* ============================================================================
+   DESIGN SYSTEM PRIMITIVES
+   ========================================================================== */
+
+function MatIcon({ name, size = 24, fill = false, color, style = {} }: {
+  name: string; size?: number; fill?: boolean; color?: string; style?: React.CSSProperties;
+}) {
+  return (
+    <span
+      className="ms"
+      style={{ fontSize: size, color, fontVariationSettings: `'FILL' ${fill ? 1 : 0}, 'wght' 400, 'GRAD' 0, 'opsz' 24`, ...style }}
+    >
+      {name}
+    </span>
+  );
+}
+
+function ProgressRing({ pct, label, sub, size = 80 }: { pct: number; label: string; sub?: string; size?: number }) {
+  const r = 40;
+  const c = 2 * Math.PI * r;
+  return (
+    <div style={{ position: 'relative', width: size, height: size, flexShrink: 0 }}>
+      <svg width={size} height={size} viewBox="0 0 100 100" style={{ transform: 'rotate(-90deg)' }}>
+        <circle cx="50" cy="50" r={r} fill="transparent" stroke="var(--surface-container)" strokeWidth="12" />
+        <circle cx="50" cy="50" r={r} fill="transparent" stroke="var(--primary-container)" strokeWidth="12"
+          strokeLinecap="round" strokeDasharray={c} strokeDashoffset={c * (1 - pct / 100)} />
+      </svg>
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+        <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: size * 0.19, lineHeight: 1, color: 'var(--primary)' }}>{label}</span>
+        {sub && <span className="label-caps" style={{ color: 'var(--on-surface-variant)', marginTop: 2, fontSize: 10 }}>{sub}</span>}
+      </div>
+    </div>
+  );
+}
+
+function ProgressSegments({ pct, total = 10 }: { pct: number; total?: number }) {
+  const f = Math.round((pct / 100) * total);
+  return (
+    <div style={{ display: 'flex', gap: 2, height: 8, background: 'var(--surface-variant)', padding: 2, border: '1px solid var(--outline-variant)', borderRadius: 5 }}>
+      {Array.from({ length: total }).map((_, i) => (
+        <div key={i} style={{ flex: 1, borderRadius: 1, background: i < f ? 'var(--primary-container)' : 'transparent', transition: 'background 0.3s' }} />
+      ))}
+    </div>
+  );
+}
+
+function StatChip({ label, value, color }: { label: string; value: number; color: string }) {
+  return (
+    <div style={{ background: 'var(--surface-container-low)', borderRadius: 'var(--radius)', padding: '8px 10px', textAlign: 'center', border: '1px solid var(--outline-variant)' }}>
+      <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 22, lineHeight: 1, color }}>{value}</div>
+      <div className="label-caps" style={{ color: 'var(--on-surface-variant)', marginTop: 3, display: 'block' }}>{label}</div>
+    </div>
+  );
+}
+
+function Card({ children, style = {}, className = '' }: { children: React.ReactNode; style?: React.CSSProperties; className?: string }) {
+  return (
+    <div style={{ background: 'var(--surface-container-lowest)', border: '2px solid var(--outline-variant)', borderRadius: 'var(--radius-lg)', padding: 16, boxShadow: 'var(--shadow-card)', ...style }} className={className}>
+      {children}
+    </div>
+  );
+}
+
+function CardTitle({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 16, marginBottom: 12, color: 'var(--on-surface)' }}>
+      {children}
+    </div>
+  );
+}
+
+function PrimaryButton({ children, onClick, disabled, icon, full, style = {} }: {
+  children: React.ReactNode; onClick?: () => void; disabled?: boolean;
+  icon?: string; full?: boolean; style?: React.CSSProperties;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      style={{ width: full ? '100%' : 'auto', borderRadius: 'var(--radius-xl)', background: disabled ? 'var(--surface-variant)' : 'var(--primary)', border: 'none', padding: '14px 22px', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', color: disabled ? 'var(--outline)' : 'var(--on-primary)', cursor: disabled ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, boxShadow: disabled ? 'none' : `0 4px 0 0 var(--on-primary-fixed-variant)`, transition: 'all 0.1s ease', ...style }}
+      className={disabled ? '' : 'btn-tactile'}
+    >
+      {icon && <MatIcon name={icon} size={16} />}
+      {children}
+    </button>
+  );
+}
+
+function SecondaryButton({ children, onClick, disabled, icon, full, style = {} }: {
+  children: React.ReactNode; onClick?: () => void; disabled?: boolean;
+  icon?: string; full?: boolean; style?: React.CSSProperties;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      style={{ width: full ? '100%' : 'auto', borderRadius: 'var(--radius)', background: 'transparent', border: '2px solid var(--outline)', padding: '11px 18px', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--on-surface)', cursor: disabled ? 'not-allowed' : 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, boxShadow: 'var(--shadow-brutalist)', transition: 'all 0.1s ease', ...style }}
+      className="btn-brut"
+    >
+      {icon && <MatIcon name={icon} size={16} />}
+      {children}
+    </button>
+  );
+}
+
+/* ============================================================================
+   FORM COMPONENTS
+   ========================================================================== */
+
+function TextField({ label, onChange, value, type = 'text', placeholder }: {
+  label: string; onChange: (value: string) => void; value: string; type?: string; placeholder?: string;
+}) {
+  return (
+    <label style={{ display: 'block' }}>
+      <span className="label-caps" style={{ color: 'var(--on-surface-variant)', display: 'block', marginBottom: 6 }}>{label}</span>
+      <input
+        type={type}
+        placeholder={placeholder}
+        style={{ width: '100%', borderRadius: 'var(--radius)', border: '2px solid var(--outline-variant)', padding: '10px 14px', fontFamily: 'var(--font-body)', fontSize: 15, color: 'var(--on-surface)', background: 'var(--surface-container-lowest)', outline: 'none', transition: 'border-color 0.15s' }}
+        onChange={(e) => onChange(e.target.value)}
+        value={value}
+        onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--primary)'; }}
+        onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--outline-variant)'; }}
+      />
+    </label>
+  );
+}
+
+function NumberField({ label, min, onChange, value }: {
+  label: string; min: number; onChange: (value: number) => void; value: number;
+}) {
+  return (
+    <label style={{ display: 'block' }}>
+      <span className="label-caps" style={{ color: 'var(--on-surface-variant)', display: 'block', marginBottom: 6 }}>{label}</span>
+      <input
+        type="number"
+        min={min}
+        style={{ width: '100%', borderRadius: 'var(--radius)', border: '2px solid var(--outline-variant)', padding: '10px 14px', fontFamily: 'var(--font-mono)', fontSize: 15, color: 'var(--on-surface)', background: 'var(--surface-container-lowest)', outline: 'none', transition: 'border-color 0.15s' }}
+        onChange={(e) => onChange(Number(e.target.value))}
+        value={value}
+        onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--primary)'; }}
+        onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--outline-variant)'; }}
+      />
+    </label>
+  );
+}
+
+/* ============================================================================
+   ALBUM COVER
+   ========================================================================== */
+
+function AlbumCover({ album, size = 48 }: { album: Album; size?: number }) {
+  if (album.cover_url) {
+    return <img alt="" style={{ width: size, height: size, borderRadius: 'var(--radius)', objectFit: 'cover', border: '2px solid var(--outline-variant)', flexShrink: 0 }} src={album.cover_url} />;
+  }
+  return (
+    <div style={{ width: size, height: size, borderRadius: 'var(--radius)', background: 'var(--primary-container)', border: '2px solid var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: size * 0.3, color: 'var(--on-primary-container)', flexShrink: 0 }}>
+      {initials(album.name) || 'AL'}
+    </div>
+  );
+}
+
+/* ============================================================================
+   EMPTY STATE
+   ========================================================================== */
+
+function EmptyState({ title, description, icon = 'inbox' }: { title: string; description: string; icon?: string }) {
+  return (
+    <div style={{ padding: '48px 24px', textAlign: 'center', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+      <div style={{ width: 64, height: 64, borderRadius: '50%', background: 'var(--surface-container)', border: '2px solid var(--outline-variant)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <MatIcon name={icon} size={32} color="var(--outline-variant)" />
+      </div>
+      <div style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 18, color: 'var(--on-surface)' }}>{title}</div>
+      <div style={{ fontSize: 14, color: 'var(--on-surface-variant)', maxWidth: 280, lineHeight: 1.5 }}>{description}</div>
+    </div>
+  );
+}
+
+/* ============================================================================
+   STICKER VISUAL
+   ========================================================================== */
+
+function StickerVisual({ sticker, compact = false }: { sticker: Sticker; compact?: boolean }) {
+  const initialsText = initials(sticker.section || sticker.title || sticker.code);
+  const extraCount = Math.max(sticker.quantity - 1, 0);
+  const size = compact ? 110 : 180;
+
+  return (
+    <div style={{ position: 'relative', margin: '0 auto', width: '100%', maxWidth: size, borderRadius: 6, border: '2px solid var(--outline-variant)', background: 'var(--surface-container-lowest)', padding: 4, boxShadow: 'var(--shadow-sticker)' }}>
+      <div style={{ aspectRatio: '3/4', overflow: 'hidden', borderRadius: 4, border: '1px solid var(--surface-container)', background: 'linear-gradient(160deg, var(--surface-container-low), var(--surface-container-high))' }}>
+        {sticker.image_url ? (
+          <img alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} src={sticker.image_url} />
+        ) : (
+          <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, padding: 8, textAlign: 'center' }}>
+            <div style={{ width: 40, height: 40, borderRadius: '50%', border: '2px solid var(--outline-variant)', background: 'rgba(255,255,255,0.8)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 14, color: 'var(--primary)' }}>
+              {initialsText || 'SS'}
+            </div>
+            <div>
+              <div className="label-caps" style={{ color: 'var(--on-surface-variant)', fontSize: 9 }}>{sticker.code}</div>
+              <div style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 11, lineHeight: 1.2, color: 'var(--on-surface)', marginTop: 2 }}>{sticker.title}</div>
+            </div>
+          </div>
+        )}
+      </div>
+      <div style={{ marginTop: 4, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 4 }}>
+        <span style={{ fontSize: 11, fontFamily: 'var(--font-body)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--on-surface-variant)' }}>{sticker.section || 'Sem time'}</span>
+        <span className="label-caps" style={{ fontSize: 9, color: 'var(--on-surface-variant)', flexShrink: 0 }}>{sticker.code}</span>
+      </div>
+      <div style={{ marginTop: 4, display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+        {sticker.quantity > 0 && <span style={{ borderRadius: 4, background: 'var(--primary-container)', padding: '2px 6px', fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 600, color: 'var(--on-primary-container)' }}>tenho</span>}
+        {sticker.is_stuck && <span style={{ borderRadius: 4, background: 'var(--tertiary-fixed-dim)', padding: '2px 6px', fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 600, color: 'var(--tertiary)' }}>colada</span>}
+        {extraCount > 0 && <span style={{ borderRadius: 4, background: 'var(--secondary-container)', padding: '2px 6px', fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 600, color: 'var(--on-secondary-container)' }}>+{extraCount}</span>}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================================
+   TEAM STICKER CARD
+   ========================================================================== */
+
+function TeamStickerCard({ onPatch, sticker }: { onPatch: (patch: StickerPatch) => void; sticker: Sticker }) {
+  const isOwned = sticker.quantity > 0;
+  const canStick = isOwned || sticker.is_stuck;
+  const state: 'empty' | 'owned' | 'duplicate' = sticker.quantity === 0 ? 'empty' : sticker.quantity > 1 ? 'duplicate' : 'owned';
+  const [peeling, setPeeling] = React.useState(false);
+
+  function handleEmptyClick() {
+    setPeeling(true);
+    setTimeout(() => setPeeling(false), 350);
+    onPatch({ quantity: 1, owned: true, wishlisted: false });
+  }
+
+  const cardBg: Record<typeof state, string> = {
+    empty: 'var(--surface-variant)',
+    owned: 'linear-gradient(160deg, var(--primary-container), var(--primary))',
+    duplicate: 'linear-gradient(160deg, var(--primary-container), var(--primary))',
+  };
+  const cardBorder: Record<typeof state, string> = {
+    empty: '1px dashed var(--outline-variant)',
+    owned: '2px solid var(--primary)',
+    duplicate: '2px solid var(--outline)',
+  };
+
+  if (state === 'empty') {
+    return (
+      <article style={{ borderRadius: 'var(--radius)', border: cardBorder.empty, background: cardBg.empty, boxShadow: 'var(--shadow-slot)' }}>
+        <div
+          className={peeling ? 'peel' : ''}
+          onClick={handleEmptyClick}
+          style={{ aspectRatio: '1', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4, cursor: 'pointer', padding: 8, position: 'relative' }}
+        >
+          <span className="label-caps" style={{ position: 'absolute', top: 6, left: 8, color: 'var(--on-surface-variant)', opacity: 0.5, fontSize: 9 }}>{sticker.code}</span>
+          <MatIcon name="add" size={28} color="var(--outline-variant)" />
+          <span className="label-caps" style={{ color: 'var(--outline)', fontSize: 9, textAlign: 'center', maxWidth: '80%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sticker.title}</span>
+        </div>
+      </article>
+    );
+  }
+
+  return (
+    <article className="hover-lift" style={{ borderRadius: 'var(--radius)', border: cardBorder[state], background: cardBg[state], boxShadow: 'var(--shadow-sticker)', position: 'relative', overflow: 'hidden' }}>
+      {/* ID chip */}
+      <span style={{ position: 'absolute', top: 4, left: 5, zIndex: 10, fontFamily: 'var(--font-mono)', fontSize: 9, fontWeight: 600, background: 'rgba(255,255,255,.92)', border: '1px solid rgba(0,0,0,.1)', borderRadius: 3, padding: '1px 4px', color: 'var(--on-surface)' }}>{sticker.code}</span>
+      {/* Collected badge */}
+      <span style={{ position: 'absolute', top: 4, right: 4, zIndex: 10, background: 'var(--primary)', color: '#fff', borderRadius: '50%', width: 18, height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 1px 2px rgba(0,0,0,.3)' }}>
+        <MatIcon name="check" size={12} fill style={{ fontVariationSettings: `'FILL' 1, 'wght' 700, 'GRAD' 0, 'opsz' 24` }} />
+      </span>
+      {/* Duplicate badge */}
+      {state === 'duplicate' && (
+        <span style={{ position: 'absolute', top: -5, right: -5, zIndex: 20, background: 'var(--secondary)', color: '#fff', fontFamily: 'var(--font-mono)', fontSize: 9, fontWeight: 600, width: 20, height: 20, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', border: '2px solid #fff' }}>+{sticker.quantity - 1}</span>
+      )}
+      <div style={{ aspectRatio: '1', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 8 }}>
+        <MatIcon name="person" size={32} fill color="rgba(255,255,255,0.85)" />
+        <span className="label-caps" style={{ color: 'rgba(255,255,255,0.8)', fontSize: 9, marginTop: 4, textAlign: 'center', maxWidth: '80%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sticker.title}</span>
+      </div>
+      <div style={{ borderTop: '1px solid rgba(255,255,255,.15)', padding: '8px 8px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+        <button
+          style={{ borderRadius: 'var(--radius-sm)', border: 'none', padding: '6px 4px', fontFamily: 'var(--font-mono)', fontSize: 9, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.03em', cursor: 'pointer', background: sticker.is_stuck ? 'rgba(255,255,255,.3)' : 'rgba(255,255,255,.15)', color: '#fff', transition: 'all .15s' }}
+          onClick={() => onPatch({ is_stuck: !sticker.is_stuck, quantity: sticker.quantity || 1, owned: true })}
+          disabled={!canStick}
+        >
+          {sticker.is_stuck ? 'Colada' : 'Colar'}
+        </button>
+        <button
+          style={{ borderRadius: 'var(--radius-sm)', border: 'none', padding: '6px 4px', fontFamily: 'var(--font-mono)', fontSize: 9, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.03em', cursor: 'pointer', background: 'rgba(255,255,255,.15)', color: '#fff', transition: 'all .15s' }}
+          onClick={() => onPatch({ quantity: Math.max(0, sticker.quantity - 1), owned: sticker.quantity - 1 > 0 })}
+        >
+          -1
+        </button>
+      </div>
+    </article>
+  );
+}
+
+/* ============================================================================
+   STICKER TABLE ROW
+   ========================================================================== */
+
+function StickerRow({ onPatch, sticker }: { onPatch: (patch: StickerPatch) => void; sticker: Sticker }) {
+  const isOwned = sticker.quantity > 0;
+
+  return (
+    <article style={{ display: 'grid', gap: 12, padding: '12px 16px', borderBottom: '1px solid var(--surface-container)' }} className="grid-cols-1 sm:grid-cols-[100px_1fr_120px_150px_120px_80px]">
+      {/* Code */}
+      <div>
+        <span className="label-caps" style={{ fontSize: 8, color: 'var(--on-surface-variant)', display: 'block' }} data-mobile-only>Código</span>
+        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 600, color: 'var(--on-surface)' }}>{sticker.code}</span>
+      </div>
+      {/* Title + thumbnail */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+        <div style={{ width: 44, flexShrink: 0 }}>
+          <StickerVisual compact sticker={sticker} />
+        </div>
+        <div style={{ minWidth: 0 }}>
+          <div style={{ fontFamily: 'var(--font-body)', fontWeight: 600, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--on-surface)' }}>{sticker.title}</div>
+          <div style={{ fontSize: 13, color: 'var(--on-surface-variant)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sticker.section || 'Sem seção'}</div>
+        </div>
+      </div>
+      {/* Status chip */}
+      <div>
+        <span style={{ display: 'inline-block', borderRadius: 'var(--radius-full)', padding: '4px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', background: isOwned ? 'var(--primary-container)' : 'var(--surface-container)', color: isOwned ? 'var(--on-primary-container)' : 'var(--on-surface-variant)' }}>
+          {isOwned ? 'Tenho' : 'Falta'}
+        </span>
+      </div>
+      {/* Quantity controls */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <button aria-label="Diminuir" style={{ width: 32, height: 32, borderRadius: 'var(--radius)', border: '2px solid var(--outline-variant)', background: 'var(--surface-container-lowest)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-display)', fontSize: 16, color: 'var(--on-surface)' }}
+          onClick={() => onPatch({ quantity: Math.max(sticker.quantity - 1, 0), owned: sticker.quantity - 1 > 0, is_stuck: sticker.quantity - 1 > 0 ? sticker.is_stuck : false })}>
+          −
+        </button>
+        <span style={{ width: 28, textAlign: 'center', fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 14 }}>{sticker.quantity}</span>
+        <button aria-label="Aumentar" style={{ width: 32, height: 32, borderRadius: 'var(--radius)', border: '2px solid var(--outline-variant)', background: 'var(--surface-container-lowest)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-display)', fontSize: 16, color: 'var(--on-surface)' }}
+          onClick={() => onPatch({ quantity: sticker.quantity + 1, owned: true, wishlisted: false })}>
+          +
+        </button>
+        {sticker.quantity > 1 && (
+          <span style={{ borderRadius: 'var(--radius-full)', background: 'var(--secondary-container)', padding: '2px 8px', fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 600, color: 'var(--on-secondary-container)' }}>troca</span>
+        )}
+      </div>
+      {/* Stick button */}
+      <div>
+        <button
+          style={{ borderRadius: 'var(--radius)', border: sticker.is_stuck ? '2px solid var(--primary)' : '2px solid var(--outline-variant)', background: sticker.is_stuck ? 'var(--primary)' : 'var(--surface-container-lowest)', padding: '7px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', cursor: 'pointer', color: sticker.is_stuck ? 'var(--on-primary)' : 'var(--on-surface)', transition: 'all 0.15s' }}
+          disabled={!isOwned && !sticker.is_stuck}
+          onClick={() => onPatch({ is_stuck: !sticker.is_stuck, quantity: sticker.quantity || 1, owned: true })}>
+          {sticker.is_stuck ? 'Colada' : 'Colar'}
+        </button>
+      </div>
+      {/* Wishlist */}
+      <div>
+        <button
+          aria-label="Desejada"
+          style={{ width: 36, height: 36, borderRadius: 'var(--radius)', border: sticker.wishlisted ? '2px solid var(--tertiary-container)' : '2px solid var(--outline-variant)', background: sticker.wishlisted ? 'var(--tertiary-fixed-dim)' : 'var(--surface-container-lowest)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s' }}
+          onClick={() => onPatch({ wishlisted: !sticker.wishlisted })}>
+          <MatIcon name="star" size={18} fill={sticker.wishlisted} color={sticker.wishlisted ? 'var(--tertiary)' : 'var(--outline-variant)'} />
+        </button>
+      </div>
+    </article>
+  );
+}
+
+/* ============================================================================
+   CATALOG TABLE
+   ========================================================================== */
+
+function StickerTable({ loading, onPatch, stickers }: {
+  loading: boolean; onPatch: (sticker: Sticker, patch: StickerPatch) => void; stickers: Sticker[];
+}) {
+  return (
+    <Card style={{ padding: 0, overflow: 'hidden' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '100px 1fr 120px 150px 120px 80px', gap: 12, padding: '10px 16px', background: 'var(--surface-container)', borderBottom: '2px solid var(--outline-variant)' }} className="hidden sm:grid">
+        {['Código', 'Figurinha', 'Status', 'Quantidade', 'Colada', 'Desejo'].map((h) => (
+          <span key={h} className="label-caps" style={{ color: 'var(--on-surface-variant)' }}>{h}</span>
+        ))}
+      </div>
+      {loading ? (
+        <EmptyState icon="hourglass_empty" title="Carregando catálogo" description="Buscando as figurinhas do álbum selecionado." />
+      ) : stickers.length === 0 ? (
+        <EmptyState icon="style" title="Catálogo vazio" description="Gere uma sequência ou adicione figurinhas ao catálogo." />
+      ) : (
+        <div>
+          {stickers.map((s) => (
+            <StickerRow key={s.id} onPatch={(p) => onPatch(s, p)} sticker={s} />
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+/* ============================================================================
+   SCAN RESULT CARD
+   ========================================================================== */
+
+function ScanResultCard({ lastScan }: { lastScan: Sticker | null }) {
+  return (
+    <Card>
+      <CardTitle>Última leitura</CardTitle>
+      {!lastScan ? (
+        <div style={{ border: '2px dashed var(--outline-variant)', borderRadius: 'var(--radius)', padding: '36px 24px', textAlign: 'center' }}>
+          <MatIcon name="qr_code_scanner" size={40} color="var(--outline-variant)" />
+          <div style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 16, marginTop: 10, color: 'var(--on-surface)' }}>Nenhuma figurinha lida</div>
+          <div style={{ fontSize: 13, color: 'var(--on-surface-variant)', marginTop: 4 }}>A leitura válida aparece aqui.</div>
+        </div>
+      ) : (
+        <div>
+          <StickerVisual sticker={lastScan} />
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 12 }}>
+            <StatChip label="Quantidade" value={lastScan.quantity} color="var(--primary)" />
+            <StatChip label="Colada" value={lastScan.is_stuck ? 1 : 0} color="var(--tertiary)" />
+          </div>
+          {lastScan.is_stuck && (
+            <div style={{ marginTop: 8, borderRadius: 'var(--radius)', background: 'var(--primary-container)', padding: '8px 12px', textAlign: 'center' }}>
+              <span className="label-caps" style={{ color: 'var(--on-primary-container)' }}>Colada no álbum</span>
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
+/* ============================================================================
+   CATALOG TOOLBAR
+   ========================================================================== */
+
+function CatalogToolbar({ filter, query, setFilter, setQuery }: {
+  filter: StickerFilter; query: string;
+  setFilter: (f: StickerFilter) => void; setQuery: (q: string) => void;
+}) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ position: 'relative' }}>
+        <MatIcon name="search" size={18} color="var(--on-surface-variant)" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)' }} />
+        <input
+          style={{ width: '100%', borderRadius: 'var(--radius)', border: '2px solid var(--outline-variant)', padding: '11px 14px 11px 38px', fontFamily: 'var(--font-body)', fontSize: 15, color: 'var(--on-surface)', background: 'var(--surface-container-lowest)', outline: 'none' }}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Buscar por código, título ou seção"
+          type="search"
+          value={query}
+          onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--primary)'; }}
+          onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--outline-variant)'; }}
+        />
+      </div>
+      <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4 }}>
+        {([
+          { v: 'all', label: 'Todas' },
+          { v: 'owned', label: 'Tenho' },
+          { v: 'missing', label: 'Faltando' },
+          { v: 'duplicates', label: 'Repetidas' },
+          { v: 'stuck', label: 'Coladas' },
+          { v: 'wishlist', label: 'Desejadas' },
+        ] as { v: StickerFilter; label: string }[]).map(({ v, label }) => {
+          const active = filter === v;
+          return (
+            <button key={v} onClick={() => setFilter(v)} style={{ flexShrink: 0, borderRadius: 'var(--radius-full)', border: active ? '2px solid var(--secondary-container)' : '2px solid var(--outline-variant)', background: active ? 'var(--secondary-container)' : 'var(--surface-container-lowest)', padding: '6px 14px', fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', color: active ? 'var(--on-secondary-container)' : 'var(--on-surface-variant)', cursor: 'pointer', transition: 'all 0.15s' }}>
+              {label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================================
+   HOME PAGE
+   ========================================================================== */
 
 function HomePage() {
   const [albums, setAlbums] = useState<Album[]>([]);
@@ -92,7 +523,8 @@ function HomePage() {
   const [lastScan, setLastScan] = useState<Sticker | null>(null);
   const [filter, setFilter] = useState<StickerFilter>('all');
   const [query, setQuery] = useState('');
-  const [viewMode, setViewMode] = useState<ViewMode>('scan');
+  const [viewMode, setViewMode] = useState<ViewMode>('teams');
+  const [mobileTab, setMobileTab] = useState<MobileTab>('home');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [scanRunning, setScanRunning] = useState(false);
@@ -102,65 +534,49 @@ function HomePage() {
   const streamRef = useRef<MediaStream | null>(null);
   const scanLockRef = useRef(false);
 
-  const selectedAlbum = albums.find((album) => album.id === selectedAlbumId);
+  const selectedAlbum = albums.find((a) => a.id === selectedAlbumId);
   const isAlbumOwner = Boolean(selectedAlbum && session?.user.id && selectedAlbum.owner_id === session.user.id);
   const pendingInviteToken = new URLSearchParams(window.location.search).get('invite');
   const stats = useMemo(() => getStats(selectedAlbum, stickers), [selectedAlbum, stickers]);
-  const duplicates = useMemo(() => stickers.filter((sticker) => sticker.quantity > 1), [stickers]);
+  const duplicates = useMemo(() => stickers.filter((s) => s.quantity > 1), [stickers]);
   const [selectedTeam, setSelectedTeam] = useState('');
   const teams = useMemo(() => {
     const byTeam = new Map<string, Sticker[]>();
-    stickers.forEach((sticker) => {
-      const team = sticker.section || 'Sem time';
-      byTeam.set(team, [...(byTeam.get(team) || []), sticker]);
-    });
-    return Array.from(byTeam.entries())
-      .map(([name, items]) => ({
-        name,
-        total: items.length,
-        owned: items.filter((sticker) => sticker.quantity > 0).length,
-        stuck: items.filter((sticker) => sticker.is_stuck).length,
-        duplicates: items.reduce((sum, sticker) => sum + Math.max(sticker.quantity - 1, 0), 0),
-      }))
-      .sort((a, b) => a.name.localeCompare(b.name));
+    stickers.forEach((s) => { const t = s.section || 'Sem time'; byTeam.set(t, [...(byTeam.get(t) || []), s]); });
+    return Array.from(byTeam.entries()).map(([name, items]) => ({
+      name, total: items.length,
+      owned: items.filter((s) => s.quantity > 0).length,
+      stuck: items.filter((s) => s.is_stuck).length,
+      duplicates: items.reduce((sum, s) => sum + Math.max(s.quantity - 1, 0), 0),
+    })).sort((a, b) => a.name.localeCompare(b.name));
   }, [stickers]);
   const activeTeam = selectedTeam || teams[0]?.name || '';
-  const teamStickers = useMemo(
-    () => stickers.filter((sticker) => (sticker.section || 'Sem time') === activeTeam),
-    [activeTeam, stickers]
-  );
-
+  const teamStickers = useMemo(() => stickers.filter((s) => (s.section || 'Sem time') === activeTeam), [activeTeam, stickers]);
   const filteredStickers = useMemo(() => {
-    const normalizedQuery = query.trim().toLowerCase();
-
-    return stickers.filter((sticker) => {
-      const matchesQuery =
-        !normalizedQuery ||
-        [sticker.code, sticker.title, sticker.section || '', sticker.notes || '']
-          .join(' ')
-          .toLowerCase()
-          .includes(normalizedQuery);
-
-      const matchesFilter =
-        filter === 'all' ||
-        (filter === 'owned' && sticker.quantity > 0) ||
-        (filter === 'missing' && sticker.quantity === 0) ||
-        (filter === 'duplicates' && sticker.quantity > 1) ||
-        (filter === 'stuck' && sticker.is_stuck) ||
-        (filter === 'wishlist' && sticker.wishlisted);
-
-      return matchesQuery && matchesFilter;
+    const nq = query.trim().toLowerCase();
+    return stickers.filter((s) => {
+      const mq = !nq || [s.code, s.title, s.section || '', s.notes || ''].join(' ').toLowerCase().includes(nq);
+      const mf = filter === 'all' || (filter === 'owned' && s.quantity > 0) || (filter === 'missing' && s.quantity === 0) || (filter === 'duplicates' && s.quantity > 1) || (filter === 'stuck' && s.is_stuck) || (filter === 'wishlist' && s.wishlisted);
+      return mq && mf;
     });
   }, [filter, query, stickers]);
+
+  function handleMobileTab(tab: MobileTab) {
+    setMobileTab(tab);
+    if (tab !== 'home') {
+      setViewMode(tab as ViewMode);
+      if (tab !== 'scan') stopCamera();
+    }
+  }
 
   async function loadAlbums() {
     try {
       setLoading(true);
       const result = await collectionStore.listAlbums();
       setAlbums(result);
-      setSelectedAlbumId((current) => current || result[0]?.id || '');
+      setSelectedAlbumId((cur) => cur || result[0]?.id || '');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Nao foi possivel carregar os albuns.');
+      setError(err instanceof Error ? err.message : 'Não foi possível carregar os álbuns.');
     } finally {
       setLoading(false);
     }
@@ -169,42 +585,29 @@ function HomePage() {
   useEffect(() => {
     async function consumeAuthRedirect() {
       try {
-        const nextSession = await collectionStore.consumeAuthRedirect();
-        if (nextSession?.access_token) {
-          setSession(nextSession);
-          setLoginForm(emptyLoginForm);
-          setLoginStep('email');
-        }
+        const next = await collectionStore.consumeAuthRedirect();
+        if (next?.access_token) { setSession(next); setLoginForm(emptyLoginForm); setLoginStep('email'); }
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Nao foi possivel concluir o login pelo link.');
+        setError(err instanceof Error ? err.message : 'Não foi possível concluir o login pelo link.');
       }
     }
-
     consumeAuthRedirect();
   }, []);
 
-  useEffect(() => {
-    loadAlbums();
-  }, [session?.access_token]);
+  useEffect(() => { loadAlbums(); }, [session?.access_token]);
 
   useEffect(() => {
     async function loadStickers() {
-      if (!selectedAlbumId) {
-        setStickers([]);
-        return;
-      }
-
+      if (!selectedAlbumId) { setStickers([]); return; }
       try {
         setLoading(true);
-        const result = await collectionStore.listStickers(selectedAlbumId);
-        setStickers(result);
+        setStickers(await collectionStore.listStickers(selectedAlbumId));
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Nao foi possivel carregar o catalogo.');
+        setError(err instanceof Error ? err.message : 'Não foi possível carregar o catálogo.');
       } finally {
         setLoading(false);
       }
     }
-
     setLastScan(null);
     setSelectedTeam('');
     stopCamera();
@@ -213,43 +616,25 @@ function HomePage() {
 
   useEffect(() => {
     async function loadMembers() {
-      if (!selectedAlbumId || !isSupabaseConfigured || !session) {
-        setMembers([]);
-        return;
-      }
-
-      try {
-        setMembers(await collectionStore.listMembers(selectedAlbumId));
-      } catch {
-        setMembers([]);
-      }
+      if (!selectedAlbumId || !isSupabaseConfigured || !session) { setMembers([]); return; }
+      try { setMembers(await collectionStore.listMembers(selectedAlbumId)); } catch { setMembers([]); }
     }
-
     loadMembers();
   }, [selectedAlbumId, session]);
 
   useEffect(() => {
     async function acceptPendingInvite() {
-      const inviteToken = new URLSearchParams(window.location.search).get('invite');
-      if (!inviteToken || !session) return;
-
+      const token = new URLSearchParams(window.location.search).get('invite');
+      if (!token || !session) return;
       try {
-        setSaving(true);
-        setError('');
-        const member = await collectionStore.acceptInvite(inviteToken);
+        setSaving(true); setError('');
+        const member = await collectionStore.acceptInvite(token);
         window.history.replaceState({}, document.title, `${window.location.pathname}${window.location.hash}`);
-        if (member) {
-          await loadAlbums();
-          setSelectedAlbumId(member.album_id);
-          setMembers(await collectionStore.listMembers(member.album_id));
-        }
+        if (member) { await loadAlbums(); setSelectedAlbumId(member.album_id); setMembers(await collectionStore.listMembers(member.album_id)); }
       } catch (err) {
-        setError(err instanceof Error ? err.message : 'Nao foi possivel aceitar o convite.');
-      } finally {
-        setSaving(false);
-      }
+        setError(err instanceof Error ? err.message : 'Não foi possível aceitar o convite.');
+      } finally { setSaving(false); }
     }
-
     acceptPendingInvite();
   }, [session]);
 
@@ -260,974 +645,664 @@ function HomePage() {
     setStickers(await collectionStore.listStickers(albumId));
   }
 
-  async function handleCreateAlbum(event: FormEvent) {
-    event.preventDefault();
-    if (!albumForm.name.trim()) {
-      setError('Informe um nome para o album.');
-      return;
-    }
-
+  async function handleCreateAlbum(e: FormEvent) {
+    e.preventDefault();
+    if (!albumForm.name.trim()) { setError('Informe um nome para o álbum.'); return; }
     try {
-      setSaving(true);
-      setError('');
+      setSaving(true); setError('');
       const album = await collectionStore.createAlbum(albumForm);
-      setAlbums((current) => [album, ...current]);
+      setAlbums((cur) => [album, ...cur]);
       setSelectedAlbumId(album.id);
       setAlbumForm(emptyAlbumForm);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Nao foi possivel criar o album.');
-    } finally {
-      setSaving(false);
-    }
+    } catch (err) { setError(err instanceof Error ? err.message : 'Não foi possível criar o álbum.');
+    } finally { setSaving(false); }
   }
 
-  async function handleRequestLogin(event: FormEvent) {
-    event.preventDefault();
+  async function handleRequestLogin(e: FormEvent) {
+    e.preventDefault();
     try {
-      setSaving(true);
-      setError('');
+      setSaving(true); setError('');
       await collectionStore.requestLogin(loginForm.email);
       setLoginStep('token');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Nao foi possivel enviar o codigo de login.');
-    } finally {
-      setSaving(false);
-    }
+    } catch (err) { setError(err instanceof Error ? err.message : 'Não foi possível enviar o código de login.');
+    } finally { setSaving(false); }
   }
 
-  async function handleVerifyLogin(event: FormEvent) {
-    event.preventDefault();
+  async function handleVerifyLogin(e: FormEvent) {
+    e.preventDefault();
     try {
-      setSaving(true);
-      setError('');
-      const nextSession = await collectionStore.verifyLogin(loginForm.email, loginForm.token);
-      setSession(nextSession);
-      setLoginForm(emptyLoginForm);
-      setLoginStep('email');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Nao foi possivel confirmar o codigo.');
-    } finally {
-      setSaving(false);
-    }
+      setSaving(true); setError('');
+      const next = await collectionStore.verifyLogin(loginForm.email, loginForm.token);
+      setSession(next); setLoginForm(emptyLoginForm); setLoginStep('email');
+    } catch (err) { setError(err instanceof Error ? err.message : 'Não foi possível confirmar o código.');
+    } finally { setSaving(false); }
   }
 
   function handleSignOut() {
     collectionStore.signOut();
-    setSession(null);
-    setAlbums([]);
-    setSelectedAlbumId('');
-    setStickers([]);
-    setMembers([]);
+    setSession(null); setAlbums([]); setSelectedAlbumId(''); setStickers([]); setMembers([]);
   }
 
-  async function handleInviteMember(event: FormEvent) {
-    event.preventDefault();
+  async function handleInviteMember(e: FormEvent) {
+    e.preventDefault();
     if (!selectedAlbumId || (!inviteForm.value.trim() && inviteForm.type !== 'link')) return;
-
     try {
-      setSaving(true);
-      setError('');
+      setSaving(true); setError('');
       const member = await collectionStore.inviteCollaborator(selectedAlbumId, inviteForm.type, inviteForm.value, 'editor');
       setInviteLink(member.invite_token ? collectionStore.getInviteLink(member) : '');
       setInviteForm(emptyInviteForm);
       setMembers(await collectionStore.listMembers(selectedAlbumId));
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Nao foi possivel convidar colaborador.');
-    } finally {
-      setSaving(false);
-    }
+    } catch (err) { setError(err instanceof Error ? err.message : 'Não foi possível convidar colaborador.');
+    } finally { setSaving(false); }
   }
 
   async function handleImportPaniniWorldCup2026() {
     try {
-      setSaving(true);
-      setError('');
+      setSaving(true); setError('');
       const album = await collectionStore.createAlbum(paniniWorldCup2026Album);
       await collectionStore.createCatalog(album.id, buildPaniniWorldCup2026Catalog());
-      setAlbums((current) => [album, ...current]);
+      setAlbums((cur) => [album, ...cur]);
       setSelectedAlbumId(album.id);
-      setViewMode('teams');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Nao foi possivel importar o catalogo Panini.');
-    } finally {
-      setSaving(false);
-    }
+      handleMobileTab('teams');
+    } catch (err) { setError(err instanceof Error ? err.message : 'Não foi possível importar o catálogo Panini.');
+    } finally { setSaving(false); }
   }
 
-  async function handleCreateCatalogSticker(event: FormEvent) {
-    event.preventDefault();
-    if (!selectedAlbumId) {
-      setError('Selecione um album antes de montar o catalogo.');
-      return;
-    }
-    if (!catalogForm.code.trim() || !catalogForm.title.trim()) {
-      setError('Informe codigo e titulo da figurinha do catalogo.');
-      return;
-    }
-
-    await addCatalogItems([
-      {
-        code: catalogForm.code,
-        title: catalogForm.title,
-        section: catalogForm.section,
-      },
-    ]);
+  async function handleCreateCatalogSticker(e: FormEvent) {
+    e.preventDefault();
+    if (!selectedAlbumId) { setError('Selecione um álbum antes de montar o catálogo.'); return; }
+    if (!catalogForm.code.trim() || !catalogForm.title.trim()) { setError('Informe código e título da figurinha.'); return; }
+    await addCatalogItems([{ code: catalogForm.code, title: catalogForm.title, section: catalogForm.section }]);
     setCatalogForm(emptyCatalogForm);
   }
 
-  async function handleGenerateCatalog(event: FormEvent) {
-    event.preventDefault();
-    if (!selectedAlbumId) {
-      setError('Selecione um album antes de gerar o catalogo.');
-      return;
-    }
-
+  async function handleGenerateCatalog(e: FormEvent) {
+    e.preventDefault();
+    if (!selectedAlbumId) { setError('Selecione um álbum antes de gerar o catálogo.'); return; }
     const count = Math.max(Number(generatorForm.count) || 0, 0);
+    if (!count) { setError('Informe quantas figurinhas deseja gerar.'); return; }
     const start = Number(generatorForm.start) || 1;
     const padding = Math.max(Number(generatorForm.padding) || 1, 1);
-    if (!count) {
-      setError('Informe quantas figurinhas deseja gerar.');
-      return;
-    }
-
-    const items: CatalogStickerInput[] = Array.from({ length: count }, (_, index) => {
-      const number = start + index;
-      const suffix = String(number).padStart(padding, '0');
+    const items: CatalogStickerInput[] = Array.from({ length: count }, (_, i) => {
+      const n = start + i;
+      const suffix = String(n).padStart(padding, '0');
       const prefix = generatorForm.prefix.trim();
       const code = prefix ? `${prefix} ${suffix}` : suffix;
-      return {
-        code,
-        title: `Figurinha ${code}`,
-        section: generatorForm.section,
-      };
+      return { code, title: `Figurinha ${code}`, section: generatorForm.section };
     });
-
     await addCatalogItems(items);
   }
 
   async function addCatalogItems(items: CatalogStickerInput[]) {
     try {
-      setSaving(true);
-      setError('');
+      setSaving(true); setError('');
       await collectionStore.createCatalog(selectedAlbumId, items);
       await reloadStickers();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Nao foi possivel atualizar o catalogo.');
-    } finally {
-      setSaving(false);
-    }
+    } catch (err) { setError(err instanceof Error ? err.message : 'Não foi possível atualizar o catálogo.');
+    } finally { setSaving(false); }
   }
 
   async function registerCode(rawCode: string) {
-    if (!selectedAlbumId) {
-      setError('Selecione um album antes de ler figurinhas.');
-      return;
-    }
-
+    if (!selectedAlbumId) { setError('Selecione um álbum antes de ler figurinhas.'); return; }
     const code = normalizeStickerCode(rawCode);
     if (!code) return;
-
     try {
-      setSaving(true);
-      setError('');
+      setSaving(true); setError('');
       const updated = await collectionStore.incrementSticker(selectedAlbumId, code);
-      setLastScan(updated);
-      setManualCode('');
-      setStickers((current) => current.map((item) => (item.id === updated.id ? updated : item)));
-    } catch (err) {
-      setLastScan(null);
-      setError(err instanceof Error ? err.message : 'Nao foi possivel registrar a figurinha.');
-    } finally {
-      setSaving(false);
-    }
+      setLastScan(updated); setManualCode('');
+      setStickers((cur) => cur.map((s) => (s.id === updated.id ? updated : s)));
+    } catch (err) { setLastScan(null); setError(err instanceof Error ? err.message : 'Não foi possível registrar a figurinha.');
+    } finally { setSaving(false); }
   }
 
   async function patchSticker(sticker: Sticker, patch: StickerPatch) {
     try {
       setError('');
-      const nextQuantity = patch.quantity ?? sticker.quantity;
-      const updated = await collectionStore.updateSticker(sticker.id, {
-        ...patch,
-        owned: patch.owned ?? nextQuantity > 0,
-      });
-      setStickers((current) => current.map((item) => (item.id === updated.id ? updated : item)));
-      if (lastScan?.id === updated.id) {
-        setLastScan(updated);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Nao foi possivel atualizar a figurinha.');
-    }
+      const nq = patch.quantity ?? sticker.quantity;
+      const updated = await collectionStore.updateSticker(sticker.id, { ...patch, owned: patch.owned ?? nq > 0 });
+      setStickers((cur) => cur.map((s) => (s.id === updated.id ? updated : s)));
+      if (lastScan?.id === updated.id) setLastScan(updated);
+    } catch (err) { setError(err instanceof Error ? err.message : 'Não foi possível atualizar a figurinha.'); }
   }
 
   async function startCamera() {
-    if (!selectedAlbumId) {
-      setError('Selecione um album antes de ler figurinhas.');
-      return;
-    }
-    if (!window.BarcodeDetector) {
-      setCameraMessage('Leitura automatica indisponivel neste navegador. Use o campo de codigo.');
-      return;
-    }
-
+    if (!selectedAlbumId) { setError('Selecione um álbum antes de ler figurinhas.'); return; }
+    if (!window.BarcodeDetector) { setCameraMessage('Leitura automática indisponível neste navegador. Use o campo de código.'); return; }
     try {
-      setError('');
-      setCameraMessage('');
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: { ideal: 'environment' } },
-        audio: false,
-      });
+      setError(''); setCameraMessage('');
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
       streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
-      setScanRunning(true);
-      scanCamera();
-    } catch {
-      setCameraMessage('Nao foi possivel acessar a camera. Confira a permissao do navegador.');
-    }
+      if (videoRef.current) { videoRef.current.srcObject = stream; await videoRef.current.play(); }
+      setScanRunning(true); scanCamera();
+    } catch { setCameraMessage('Não foi possível acessar a câmera. Confira a permissão do navegador.'); }
   }
 
   function stopCamera() {
-    streamRef.current?.getTracks().forEach((track) => track.stop());
-    streamRef.current = null;
-    setScanRunning(false);
-    scanLockRef.current = false;
+    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current = null; setScanRunning(false); scanLockRef.current = false;
   }
 
   async function scanCamera() {
     const detector = window.BarcodeDetector ? new window.BarcodeDetector() : null;
     if (!detector) return;
-
     const loop = async () => {
       if (!streamRef.current || !videoRef.current) return;
       try {
         const codes = await detector.detect(videoRef.current);
-        const rawValue = codes[0]?.rawValue;
-        if (rawValue && !scanLockRef.current) {
+        const raw = codes[0]?.rawValue;
+        if (raw && !scanLockRef.current) {
           scanLockRef.current = true;
-          await registerCode(rawValue);
-          window.setTimeout(() => {
-            scanLockRef.current = false;
-          }, 1400);
+          await registerCode(raw);
+          window.setTimeout(() => { scanLockRef.current = false; }, 1400);
         }
-      } catch {
-        setCameraMessage('Nao foi possivel ler a imagem da camera.');
-      }
+      } catch { setCameraMessage('Não foi possível ler a imagem da câmera.'); }
       window.requestAnimationFrame(loop);
     };
-
     window.requestAnimationFrame(loop);
   }
 
+  /* ── NAV TABS ─────────────────────────────────────────────────── */
+  const NAV_TABS = [
+    { id: 'home' as MobileTab,    icon: 'home',            label: 'Início' },
+    { id: 'scan' as MobileTab,    icon: 'qr_code_scanner', label: 'Leitor' },
+    { id: 'teams' as MobileTab,   icon: 'groups',          label: 'Times' },
+    { id: 'catalog' as MobileTab, icon: 'list_alt',        label: 'Catálogo' },
+    { id: 'trades' as MobileTab,  icon: 'sync_alt',        label: 'Trocas' },
+  ];
+
+  const DESKTOP_VIEW_TABS: { id: ViewMode; icon: string; label: string }[] = [
+    { id: 'scan',    icon: 'qr_code_scanner', label: 'Leitor' },
+    { id: 'teams',   icon: 'groups',          label: 'Times' },
+    { id: 'catalog', icon: 'list_alt',        label: 'Catálogo' },
+    { id: 'trades',  icon: 'sync_alt',        label: 'Trocas' },
+  ];
+
+  /* ── RENDER ───────────────────────────────────────────────────── */
   return (
-    <main className="min-h-screen bg-slate-100 text-zinc-950">
-      <header className="border-b border-slate-200 bg-emerald-950 text-white">
-        <div className="mx-auto flex max-w-7xl flex-col gap-5 px-4 py-5 sm:px-6 lg:px-8">
-          <div className="flex flex-col justify-between gap-4 md:flex-row md:items-center">
-            <div>
-              <p className="text-sm font-medium text-emerald-100">Album de figurinhas</p>
-              <h1 className="text-3xl font-semibold tracking-normal text-white">StickerShelf</h1>
-            </div>
-            <div className="flex items-center gap-2 rounded-md border border-slate-200 bg-white/70 px-3 py-2 text-sm text-zinc-700">
-              <span className={`h-2.5 w-2.5 rounded-full ${isSupabaseConfigured ? 'bg-emerald-500' : 'bg-emerald-500'}`} />
-              {isSupabaseConfigured ? 'Supabase conectado' : 'Modo local sem Supabase'}
-            </div>
+    <div
+      className="paper-texture"
+      style={{ minHeight: '100vh', fontFamily: 'var(--font-body)', color: 'var(--on-surface)', paddingBottom: 72 }}
+    >
+      {/* ── TOP APP BAR ──────────────────────────────────────────── */}
+      <header style={{ position: 'sticky', top: 0, zIndex: 40, background: 'rgba(248,249,255,0.92)', backdropFilter: 'blur(12px)', borderBottom: '2px solid var(--outline-variant)' }}>
+        <div style={{ maxWidth: 1280, margin: '0 auto', padding: '0 16px', height: 56, display: 'flex', alignItems: 'center', gap: 12 }}>
+          {/* Logo */}
+          <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 22, color: 'var(--primary)', letterSpacing: '-0.01em', flexShrink: 0 }}>
+            StickerShelf
           </div>
 
+          {/* Album name pill (mobile only) */}
           {selectedAlbum && (
-            <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
-              <Metric label="Album" value={`${stats.completion}%`} />
-              <Metric label="Tenho" value={`${stats.owned}/${Math.max(selectedAlbum.total_stickers, stats.totalRegistered)}`} />
-              <Metric label="Faltam" value={String(stats.missing)} />
-              <Metric label="Coladas" value={String(stats.stuck)} />
-              <Metric label="Para troca" value={String(stats.duplicates)} />
-              <Metric label="Desejadas" value={String(stats.wishlisted)} />
-            </section>
+            <div className="flex lg:hidden" style={{ flex: 1, minWidth: 0 }}>
+              <span className="label-caps" style={{ fontSize: 10, color: 'var(--on-surface-variant)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {selectedAlbum.name}
+              </span>
+            </div>
+          )}
+          {!selectedAlbum && <div style={{ flex: 1 }} className="lg:hidden" />}
+
+          {/* Desktop spacer */}
+          <div className="hidden lg:block" style={{ flex: 1 }} />
+
+          {/* Connection badge */}
+          <div className="hidden sm:flex" style={{ alignItems: 'center', gap: 6 }}>
+            <span style={{ width: 7, height: 7, borderRadius: '50%', background: isSupabaseConfigured ? 'var(--primary-container)' : 'var(--outline-variant)', display: 'inline-block' }} />
+            <span className="label-caps" style={{ color: 'var(--on-surface-variant)', fontSize: 10 }}>{isSupabaseConfigured ? 'Online' : 'Local'}</span>
+          </div>
+
+          {/* Auth avatar (mobile) */}
+          {isSupabaseConfigured && (
+            <button
+              className="flex lg:hidden"
+              onClick={() => handleMobileTab('home')}
+              style={{ width: 34, height: 34, borderRadius: '50%', background: session ? 'var(--primary-container)' : 'var(--surface-container)', border: `2px solid ${session ? 'var(--primary)' : 'var(--outline-variant)'}`, alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0 }}
+            >
+              <MatIcon name={session ? 'person' : 'login'} size={18} fill={!!session} color={session ? 'var(--on-primary-container)' : 'var(--on-surface-variant)'} />
+            </button>
           )}
         </div>
       </header>
 
-      <div className="mx-auto grid max-w-7xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[320px_1fr] lg:px-8">
-        <aside className="space-y-4">
-          <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-            <h2 className="mb-3 text-base font-semibold">Identidade</h2>
-            {!isSupabaseConfigured ? (
-              <p className="text-sm text-zinc-500">Configure o Supabase para usar login e colaboracao.</p>
-            ) : session ? (
-              <div className="space-y-3">
-                <div className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
-                  {session.user.email || 'Usuario conectado'}
-                </div>
-                <button className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium hover:bg-zinc-50" onClick={handleSignOut} type="button">
-                  Sair
-                </button>
-              </div>
-            ) : loginStep === 'email' ? (
-              <form className="space-y-3" onSubmit={handleRequestLogin}>
-                {pendingInviteToken && (
-                  <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-900">Entre para aceitar o convite do album.</p>
-                )}
-                <TextField label="E-mail" value={loginForm.email} onChange={(email) => setLoginForm({ ...loginForm, email })} />
-                <button className="w-full rounded-md bg-emerald-700 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-800" disabled={saving} type="submit">
-                  Enviar codigo
-                </button>
-              </form>
-            ) : (
-              <form className="space-y-3" onSubmit={handleVerifyLogin}>
-                <TextField label="Codigo recebido" value={loginForm.token} onChange={(token) => setLoginForm({ ...loginForm, token })} />
-                <button className="w-full rounded-md bg-emerald-700 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-800" disabled={saving} type="submit">
-                  Entrar
-                </button>
-                <button className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium hover:bg-zinc-50" onClick={() => setLoginStep('email')} type="button">
-                  Trocar e-mail
-                </button>
-              </form>
-            )}
-          </section>
+      {/* ── CONTENT AREA ─────────────────────────────────────────── */}
+      <div style={{ maxWidth: 1280, margin: '0 auto' }}>
 
-          <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-base font-semibold">Albuns</h2>
-              <span className="text-sm text-zinc-500">{albums.length}</span>
-            </div>
-            <div className="space-y-2">
-              {albums.map((album) => (
-                <button
-                  className={`w-full rounded-md border p-3 text-left transition ${
-                    album.id === selectedAlbumId
-                      ? 'border-emerald-600 bg-emerald-50'
-                      : 'border-slate-200 bg-white hover:border-emerald-500'
-                  }`}
-                  key={album.id}
-                  onClick={() => setSelectedAlbumId(album.id)}
-                  type="button"
-                >
-                  <div className="flex items-center gap-3">
-                    <AlbumCover album={album} />
-                    <div className="min-w-0">
-                      <p className="truncate font-medium">{album.name}</p>
-                      <p className="truncate text-sm text-zinc-500">
-                        {[album.publisher, album.season].filter(Boolean).join(' - ') || 'Sem editora'}
-                      </p>
-                    </div>
-                  </div>
-                </button>
-              ))}
-            </div>
-          </section>
-
-          <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-            <h2 className="mb-3 text-base font-semibold">Catalogos prontos</h2>
-            <button
-              className="w-full rounded-md bg-emerald-700 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-800"
-              disabled={saving}
-              onClick={handleImportPaniniWorldCup2026}
-              type="button"
-            >
-              Importar Panini Copa 2026
-            </button>
-            <p className="mt-2 text-xs leading-5 text-zinc-600">
-              Cria 980 posicoes: introducao/FWC e 48 selecoes com 20 figurinhas por time.
-            </p>
-          </section>
-
-          <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-            <h2 className="mb-3 text-base font-semibold">Novo album</h2>
-            <form className="space-y-3" onSubmit={handleCreateAlbum}>
-              <TextField label="Nome" value={albumForm.name} onChange={(name) => setAlbumForm({ ...albumForm, name })} />
-              <TextField label="Editora" value={albumForm.publisher} onChange={(publisher) => setAlbumForm({ ...albumForm, publisher })} />
-              <TextField label="Ano/temporada" value={albumForm.season} onChange={(season) => setAlbumForm({ ...albumForm, season })} />
-              <TextField label="URL da capa" value={albumForm.cover_url} onChange={(cover_url) => setAlbumForm({ ...albumForm, cover_url })} />
-              <NumberField
-                label="Total de figurinhas"
-                min={1}
-                onChange={(total_stickers) => setAlbumForm({ ...albumForm, total_stickers })}
-                value={albumForm.total_stickers}
-              />
-              <button className="w-full rounded-md bg-zinc-950 px-3 py-2 text-sm font-medium text-white hover:bg-zinc-800" disabled={saving} type="submit">
-                Criar album
-              </button>
-            </form>
-          </section>
-
-          {selectedAlbum && session && isAlbumOwner && (
-            <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-              <h2 className="mb-3 text-base font-semibold">Colaboradores</h2>
-              <form className="space-y-3" onSubmit={handleInviteMember}>
-                <label className="block text-sm font-medium text-zinc-700">
-                  Tipo de convite
-                  <select
-                    className="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
-                    onChange={(event) => setInviteForm({ type: event.target.value as InviteType, value: '' })}
-                    value={inviteForm.type}
-                  >
-                    <option value="email">E-mail</option>
-                    <option value="username">Username</option>
-                    <option value="phone">Telefone</option>
-                    <option value="link">Magic link</option>
-                  </select>
-                </label>
-                {inviteForm.type !== 'link' && (
-                  <TextField
-                    label={inviteForm.type === 'phone' ? 'Telefone' : inviteForm.type === 'username' ? 'Username' : 'E-mail'}
-                    value={inviteForm.value}
-                    onChange={(value) => setInviteForm({ ...inviteForm, value })}
-                  />
-                )}
-                <button className="w-full rounded-md bg-zinc-950 px-3 py-2 text-sm font-medium text-white hover:bg-zinc-800" disabled={saving} type="submit">
-                  Convidar editor
-                </button>
-              </form>
-              {inviteLink && (
-                <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-950">
-                  <p className="font-medium">Magic link criado</p>
-                  <p className="mt-1 break-all text-xs">{inviteLink}</p>
-                </div>
-              )}
-              <div className="mt-4 space-y-2">
-                {members.map((member) => (
-                  <div className="rounded-md bg-zinc-50 px-3 py-2 text-sm" key={member.id}>
-                    <p className="font-medium text-zinc-800">
-                      {member.invite_type === 'link' && !member.invite_value ? 'Magic link pendente' : member.invite_value || member.email || member.user_id || 'Colaborador'}
-                    </p>
-                    <p className="text-xs uppercase text-zinc-500">
-                      {member.role} - {member.invite_type}{member.accepted_at ? ' aceito' : ''}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            </section>
-          )}
-        </aside>
-
-        <section className="space-y-4">
-          {error && <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{error}</div>}
-
-          <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
-            <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-              <div>
-                <h2 className="text-xl font-semibold">{selectedAlbum?.name || 'Nenhum album selecionado'}</h2>
-                <p className="text-sm text-zinc-500">
-                  {selectedAlbum ? `${stats.totalRegistered} figurinhas no catalogo` : 'Crie ou selecione um album.'}
-                </p>
-              </div>
-              <div className="grid grid-cols-4 rounded-md border border-zinc-200 bg-zinc-50 p-1 text-sm">
-                <ViewButton active={viewMode === 'scan'} label="Leitor" onClick={() => setViewMode('scan')} />
-                <ViewButton active={viewMode === 'teams'} label="Times" onClick={() => setViewMode('teams')} />
-                <ViewButton active={viewMode === 'catalog'} label="Catalogo" onClick={() => setViewMode('catalog')} />
-                <ViewButton active={viewMode === 'trades'} label="Trocas" onClick={() => setViewMode('trades')} />
-              </div>
-            </div>
-
-            {selectedAlbum && (
-              <div className="mt-4 h-2 overflow-hidden rounded-full bg-zinc-100">
-                <div className="h-full rounded-full bg-emerald-500" style={{ width: `${Math.min(stats.completion, 100)}%` }} />
-              </div>
-            )}
-          </section>
-
-          {viewMode === 'scan' && selectedAlbum && (
-            <section className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
-              <div className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
-                <div className="mb-3 flex items-center justify-between gap-3">
-                  <h2 className="text-base font-semibold">Ler figurinha</h2>
-                  <button
-                    className="rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium hover:bg-zinc-50"
-                    onClick={scanRunning ? stopCamera : startCamera}
-                    type="button"
-                  >
-                    {scanRunning ? 'Parar camera' : 'Abrir camera'}
-                  </button>
-                </div>
-
-                <div className="overflow-hidden rounded-lg border border-zinc-200 bg-zinc-950">
-                  <video className="aspect-video w-full object-cover" muted playsInline ref={videoRef} />
-                </div>
-
-                {cameraMessage && <p className="mt-3 text-sm text-amber-700">{cameraMessage}</p>}
-
-                <form className="mt-4 flex flex-col gap-2 sm:flex-row" onSubmit={(event) => { event.preventDefault(); registerCode(manualCode); }}>
-                  <input
-                    className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm uppercase outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
-                    onChange={(event) => setManualCode(event.target.value)}
-                    placeholder="Codigo da figurinha"
-                    value={manualCode}
-                  />
-                  <button className="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700" disabled={saving} type="submit">
-                    Registrar +1
-                  </button>
-                </form>
-              </div>
-
-              <ScanResultCard lastScan={lastScan} />
-            </section>
-          )}
-
-          {viewMode === 'teams' && selectedAlbum && (
-            <section className="grid gap-4 xl:grid-cols-[280px_1fr]">
-              <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
-                <div className="mb-3 flex items-center justify-between">
-                  <h2 className="text-base font-semibold">Times</h2>
-                  <span className="text-sm text-zinc-500">{teams.length}</span>
-                </div>
-                {teams.length === 0 ? (
-                  <EmptyState title="Sem times" description="Adicione figurinhas com o campo Secao preenchido pelo time." />
-                ) : (
-                  <div className="space-y-2">
-                    {teams.map((team) => (
-                      <button
-                        className={`w-full rounded-md border p-3 text-left transition ${
-                          activeTeam === team.name ? 'border-emerald-500 bg-emerald-50' : 'border-zinc-200 hover:border-zinc-300'
-                        }`}
-                        key={team.name}
-                        onClick={() => setSelectedTeam(team.name)}
-                        type="button"
-                      >
-                        <div className="flex items-center justify-between gap-3">
-                          <div>
-                            <p className="font-medium">{team.name}</p>
-                            <p className="text-sm text-zinc-500">{team.owned}/{team.total} tenho - {team.stuck} coladas</p>
-                          </div>
-                          {team.duplicates > 0 && (
-                            <span className="rounded-full bg-sky-100 px-2 py-1 text-xs font-semibold text-sky-800">{team.duplicates}</span>
-                          )}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </section>
-
-              <section className="rounded-lg border border-zinc-200 bg-white shadow-sm">
-                <div className="border-b border-zinc-200 px-4 py-3">
-                  <h2 className="text-base font-semibold">{activeTeam || 'Time'}</h2>
-                  <p className="text-sm text-zinc-500">Marque se ja tem, se ja colou e ajuste repetidas.</p>
-                </div>
-                {teamStickers.length === 0 ? (
-                  <EmptyState title="Sem figurinhas neste time" description="Use o catalogo para cadastrar as figurinhas por time." />
-                ) : (
-                  <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3">
-                    {teamStickers.map((sticker) => (
-                      <TeamStickerCard key={sticker.id} onPatch={(patch) => patchSticker(sticker, patch)} sticker={sticker} />
-                    ))}
-                  </div>
-                )}
-              </section>
-            </section>
-          )}
-
-          {viewMode === 'catalog' && selectedAlbum && (
-            <>
-              <section className="grid gap-4 xl:grid-cols-2">
-                <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
-                  <h2 className="mb-3 text-base font-semibold">Adicionar ao catalogo</h2>
-                  <form className="grid gap-3 sm:grid-cols-[120px_1fr_160px_auto]" onSubmit={handleCreateCatalogSticker}>
-                    <TextField label="Codigo" value={catalogForm.code} onChange={(code) => setCatalogForm({ ...catalogForm, code })} />
-                    <TextField label="Titulo" value={catalogForm.title} onChange={(title) => setCatalogForm({ ...catalogForm, title })} />
-                    <TextField label="Secao" value={catalogForm.section} onChange={(section) => setCatalogForm({ ...catalogForm, section })} />
-                    <button className="self-end rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700" disabled={saving} type="submit">
-                      Salvar
-                    </button>
-                  </form>
-                </section>
-
-                <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
-                  <h2 className="mb-3 text-base font-semibold">Gerar sequencia</h2>
-                  <form className="grid gap-3 sm:grid-cols-[1fr_90px_90px_90px] xl:grid-cols-[1fr_80px_80px_80px_auto]" onSubmit={handleGenerateCatalog}>
-                    <TextField label="Prefixo" value={generatorForm.prefix} onChange={(prefix) => setGeneratorForm({ ...generatorForm, prefix })} />
-                    <NumberField label="Inicio" min={1} onChange={(start) => setGeneratorForm({ ...generatorForm, start })} value={generatorForm.start} />
-                    <NumberField label="Qtd." min={1} onChange={(count) => setGeneratorForm({ ...generatorForm, count })} value={generatorForm.count} />
-                    <NumberField label="Digitos" min={1} onChange={(padding) => setGeneratorForm({ ...generatorForm, padding })} value={generatorForm.padding} />
-                    <button className="self-end rounded-md bg-zinc-950 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-800" disabled={saving} type="submit">
-                      Gerar
-                    </button>
-                  </form>
-                </section>
-              </section>
-
-              <CatalogToolbar filter={filter} query={query} setFilter={setFilter} setQuery={setQuery} />
-              <StickerTable loading={loading} onPatch={patchSticker} stickers={filteredStickers} />
-            </>
-          )}
-
-          {viewMode === 'trades' && (
-            <section className="rounded-lg border border-zinc-200 bg-white shadow-sm">
-              <div className="border-b border-zinc-200 px-4 py-3">
-                <h2 className="text-base font-semibold">Disponiveis para troca</h2>
-                <p className="text-sm text-zinc-500">{duplicates.length} modelos com repetidas, {stats.duplicates} figurinhas extras.</p>
-              </div>
-              {duplicates.length === 0 ? (
-                <EmptyState title="Nenhuma repetida" description="Quando uma quantidade passar de 1, ela aparece aqui para troca." />
-              ) : (
-                <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3">
-                  {duplicates.map((sticker) => (
-                    <article className="rounded-lg border border-zinc-200 p-4" key={sticker.id}>
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="font-mono text-sm font-semibold">{sticker.code}</p>
-                          <h3 className="font-medium">{sticker.title}</h3>
-                          <p className="text-sm text-zinc-500">{sticker.section || 'Sem secao'}</p>
-                        </div>
-                        <span className="rounded-full bg-sky-100 px-2 py-1 text-xs font-semibold text-sky-800">
-                          {sticker.quantity - 1} troca
-                        </span>
-                      </div>
-                      <button
-                        className="mt-4 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium hover:bg-zinc-50"
-                        onClick={() => patchSticker(sticker, { quantity: Math.max(sticker.quantity - 1, 0), owned: sticker.quantity - 1 > 0 })}
-                        type="button"
-                      >
-                        Marcar troca feita
-                      </button>
-                    </article>
-                  ))}
-                </div>
-              )}
-            </section>
-          )}
-        </section>
-      </div>
-    </main>
-  );
-}
-
-function AlbumCover({ album }: { album: Album }) {
-  if (album.cover_url) {
-    return <img alt="" className="h-12 w-12 rounded-md object-cover" src={album.cover_url} />;
-  }
-
-  return (
-    <div className="grid h-12 w-12 place-items-center rounded-md bg-emerald-100 text-sm font-semibold text-emerald-900">
-      {initials(album.name) || 'AL'}
-    </div>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-lg border border-slate-200 bg-white/70 px-4 py-3">
-      <p className="text-sm text-zinc-500">{label}</p>
-      <p className="text-2xl font-semibold text-zinc-950">{value}</p>
-    </div>
-  );
-}
-
-function ViewButton({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
-  return (
-    <button
-      className={`rounded px-3 py-2 font-medium ${active ? 'bg-white text-zinc-950 shadow-sm' : 'text-zinc-600 hover:text-zinc-950'}`}
-      onClick={onClick}
-      type="button"
-    >
-      {label}
-    </button>
-  );
-}
-
-function CatalogToolbar({
-  filter,
-  query,
-  setFilter,
-  setQuery,
-}: {
-  filter: StickerFilter;
-  query: string;
-  setFilter: (filter: StickerFilter) => void;
-  setQuery: (query: string) => void;
-}) {
-  return (
-    <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
-      <div className="flex flex-col gap-2 sm:flex-row">
-        <input
-          className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
-          onChange={(event) => setQuery(event.target.value)}
-          placeholder="Buscar por codigo, titulo ou secao"
-          type="search"
-          value={query}
-        />
-        <select
-          className="rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
-          onChange={(event) => setFilter(event.target.value as StickerFilter)}
-          value={filter}
-        >
-          <option value="all">Todas</option>
-          <option value="owned">Tenho</option>
-          <option value="missing">Faltando</option>
-          <option value="duplicates">Repetidas</option>
-          <option value="stuck">Coladas</option>
-          <option value="wishlist">Desejadas</option>
-        </select>
-      </div>
-    </section>
-  );
-}
-
-function ScanResultCard({ lastScan }: { lastScan: Sticker | null }) {
-  return (
-    <section className="rounded-lg border border-zinc-200 bg-white p-4 shadow-sm">
-      <h2 className="mb-3 text-base font-semibold">Ultima leitura</h2>
-      {!lastScan ? (
-        <div className="rounded-lg border border-dashed border-zinc-300 px-4 py-10 text-center">
-          <p className="font-medium text-zinc-800">Nenhuma figurinha lida</p>
-          <p className="mt-1 text-sm text-zinc-500">A leitura valida aparece aqui.</p>
-        </div>
-      ) : (
-        <div className="rounded-lg border border-slate-200 bg-white p-4">
-          <StickerVisual sticker={lastScan} />
-          <div className="mt-4 grid grid-cols-2 gap-3">
-            <Metric label="Quantidade" value={String(lastScan.quantity)} />
-            <Metric label="Colada" value={lastScan.is_stuck ? 'Sim' : 'Nao'} />
-          </div>
-        </div>
-      )}
-    </section>
-  );
-}
-
-function StickerTable({
-  loading,
-  onPatch,
-  stickers,
-}: {
-  loading: boolean;
-  onPatch: (sticker: Sticker, patch: StickerPatch) => void;
-  stickers: Sticker[];
-}) {
-  return (
-    <section className="overflow-hidden rounded-lg border border-zinc-200 bg-white shadow-sm">
-      <div className="grid grid-cols-[110px_1fr_120px_150px_120px_90px] gap-3 border-b border-zinc-200 bg-zinc-50 px-4 py-3 text-xs font-semibold uppercase tracking-wide text-zinc-500 max-lg:hidden">
-        <span>Codigo</span>
-        <span>Figurinha</span>
-        <span>Status</span>
-        <span>Quantidade</span>
-        <span>Colada</span>
-        <span>Desejo</span>
-      </div>
-      {loading ? (
-        <EmptyState title="Carregando catalogo" description="Buscando as figurinhas do album selecionado." />
-      ) : stickers.length === 0 ? (
-        <EmptyState title="Catalogo vazio" description="Gere uma sequencia ou adicione figurinhas ao catalogo." />
-      ) : (
-        <div className="divide-y divide-zinc-100">
-          {stickers.map((sticker) => (
-            <StickerRow key={sticker.id} onPatch={(patch) => onPatch(sticker, patch)} sticker={sticker} />
-          ))}
-        </div>
-      )}
-    </section>
-  );
-}
-
-function TextField({ label, onChange, value }: { label: string; onChange: (value: string) => void; value: string }) {
-  return (
-    <label className="block text-sm font-medium text-zinc-700">
-      {label}
-      <input
-        className="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
-        onChange={(event) => onChange(event.target.value)}
-        type="text"
-        value={value}
-      />
-    </label>
-  );
-}
-
-function NumberField({
-  label,
-  min,
-  onChange,
-  value,
-}: {
-  label: string;
-  min: number;
-  onChange: (value: number) => void;
-  value: number;
-}) {
-  return (
-    <label className="block text-sm font-medium text-zinc-700">
-      {label}
-      <input
-        className="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
-        min={min}
-        onChange={(event) => onChange(Number(event.target.value))}
-        type="number"
-        value={value}
-      />
-    </label>
-  );
-}
-
-function EmptyState({ description, title }: { description: string; title: string }) {
-  return (
-    <div className="px-4 py-14 text-center">
-      <p className="font-medium text-zinc-800">{title}</p>
-      <p className="mt-1 text-sm text-zinc-500">{description}</p>
-    </div>
-  );
-}
-
-function StickerVisual({ compact = false, sticker }: { compact?: boolean; sticker: Sticker }) {
-  const initialsText = initials(sticker.section || sticker.title || sticker.code);
-  const extraCount = Math.max(sticker.quantity - 1, 0);
-
-  return (
-    <div className={`relative mx-auto w-full max-w-[190px] rounded-[6px] border border-zinc-300 bg-white p-2 shadow-sm ${compact ? 'max-w-[150px]' : ''}`}>
-      <div className="aspect-[3/4] overflow-hidden rounded-[4px] border border-zinc-200 bg-gradient-to-b from-[#f8f5eb] to-[#e2d6bd]">
-        {sticker.image_url ? (
-          <img alt="" className="h-full w-full object-cover" src={sticker.image_url} />
-        ) : (
-          <div className="flex h-full flex-col items-center justify-center gap-3 px-3 text-center">
-            <div className="grid h-14 w-14 place-items-center rounded-full border border-slate-200 bg-white/80 text-lg font-bold text-emerald-900">
-              {initialsText || 'SS'}
-            </div>
-            <div>
-              <p className="font-mono text-xs font-semibold text-zinc-600">{sticker.code}</p>
-              <p className="mt-1 text-sm font-semibold leading-tight text-zinc-900">{sticker.title}</p>
-            </div>
+        {/* Error banner */}
+        {error && (
+          <div style={{ margin: '12px 16px 0', padding: '12px 16px', background: 'var(--error-container)', border: '2px solid var(--error)', borderRadius: 'var(--radius)', color: 'var(--on-error-container)', fontSize: 14, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+            <span style={{ flex: 1 }}>{error}</span>
+            <button onClick={() => setError('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--on-error-container)', fontWeight: 700, padding: '0 4px', fontSize: 16, lineHeight: 1 }}>✕</button>
           </div>
         )}
+
+        <div className="p-4 lg:p-6" style={{ display: 'grid', gap: 16, alignItems: 'start' }}>
+          <div className="lg:grid lg:grid-cols-[300px_1fr]" style={{ gap: 16, display: 'grid' }}>
+
+            {/* ══ SIDEBAR / HOME TAB ══════════════════════════════ */}
+            <aside className={`space-y-4 ${mobileTab !== 'home' ? 'hidden lg:block' : 'block'}`}>
+
+              {/* Auth section */}
+              <Card>
+                <CardTitle>Identidade</CardTitle>
+                {!isSupabaseConfigured ? (
+                  <p style={{ fontSize: 14, color: 'var(--on-surface-variant)', lineHeight: 1.5 }}>Configure o Supabase para usar login e colaboração.</p>
+                ) : session ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                    <div style={{ borderRadius: 'var(--radius)', background: 'var(--primary-container)', padding: '10px 14px', fontSize: 14, fontFamily: 'var(--font-body)', color: 'var(--on-primary-container)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <MatIcon name="person" size={18} fill color="var(--on-primary-container)" />
+                      {session.user.email || 'Conectado'}
+                    </div>
+                    <SecondaryButton full onClick={handleSignOut}>Sair</SecondaryButton>
+                  </div>
+                ) : loginStep === 'email' ? (
+                  <form style={{ display: 'flex', flexDirection: 'column', gap: 10 }} onSubmit={handleRequestLogin}>
+                    {pendingInviteToken && (
+                      <div style={{ borderRadius: 'var(--radius)', background: 'var(--primary-container)', padding: '10px 14px', fontSize: 13, color: 'var(--on-primary-container)' }}>
+                        Entre para aceitar o convite do álbum.
+                      </div>
+                    )}
+                    <TextField label="E-mail" value={loginForm.email} onChange={(email) => setLoginForm({ ...loginForm, email })} />
+                    <PrimaryButton full disabled={saving} icon="send">Enviar código</PrimaryButton>
+                  </form>
+                ) : (
+                  <form style={{ display: 'flex', flexDirection: 'column', gap: 10 }} onSubmit={handleVerifyLogin}>
+                    <TextField label="Código recebido" value={loginForm.token} onChange={(token) => setLoginForm({ ...loginForm, token })} />
+                    <PrimaryButton full disabled={saving} icon="login">Entrar</PrimaryButton>
+                    <SecondaryButton full onClick={() => setLoginStep('email')}>Trocar e-mail</SecondaryButton>
+                  </form>
+                )}
+              </Card>
+
+              {/* Albums list */}
+              <Card>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                  <CardTitle>Álbuns</CardTitle>
+                  <span className="label-caps" style={{ color: 'var(--on-surface-variant)', fontSize: 10 }}>{albums.length}</span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  {albums.map((album) => {
+                    const active = album.id === selectedAlbumId;
+                    return (
+                      <button
+                        key={album.id}
+                        className={active ? '' : 'hover-lift'}
+                        onClick={() => {
+                          setSelectedAlbumId(album.id);
+                          if (mobileTab === 'home') handleMobileTab('teams');
+                        }}
+                        style={{ width: '100%', textAlign: 'left', borderRadius: 'var(--radius-md)', border: active ? '2px solid var(--primary)' : '2px solid var(--outline-variant)', background: active ? 'var(--primary-container)' : 'var(--surface-container-lowest)', padding: '10px 12px', cursor: 'pointer', boxShadow: active ? '4px 4px 0 0 var(--primary)' : 'var(--shadow-card)', transition: 'border-color 0.15s, box-shadow 0.15s' }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <AlbumCover album={album} size={40} />
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <div style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: active ? 'var(--on-primary-container)' : 'var(--on-surface)' }}>
+                              {album.name}
+                            </div>
+                            <div className="label-caps" style={{ fontSize: 9, color: active ? 'var(--on-primary-container)' : 'var(--on-surface-variant)', marginTop: 2 }}>
+                              {[album.publisher, album.season].filter(Boolean).join(' · ') || 'Sem editora'}
+                            </div>
+                          </div>
+                        </div>
+                        {active && stickers.length > 0 && (
+                          <div style={{ marginTop: 8 }}>
+                            <ProgressSegments pct={stats.completion} />
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                  {albums.length === 0 && !loading && (
+                    <div style={{ textAlign: 'center', padding: '24px 0' }}>
+                      <MatIcon name="library_books" size={36} color="var(--outline-variant)" />
+                      <div className="label-caps" style={{ color: 'var(--on-surface-variant)', marginTop: 8 }}>Nenhum álbum ainda</div>
+                    </div>
+                  )}
+                </div>
+              </Card>
+
+              {/* Catalog imports */}
+              <Card>
+                <CardTitle>Catálogos prontos</CardTitle>
+                <button
+                  className="btn-brut"
+                  disabled={saving}
+                  onClick={handleImportPaniniWorldCup2026}
+                  style={{ width: '100%', borderRadius: 'var(--radius)', background: 'var(--surface-container-lowest)', border: '2px solid var(--on-surface)', padding: '12px 16px', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, color: 'var(--on-surface)', boxShadow: 'var(--shadow-brutalist)' }}
+                >
+                  <MatIcon name="sports_soccer" size={18} />
+                  Panini Copa 2026
+                </button>
+                <p style={{ marginTop: 8, fontSize: 12, color: 'var(--on-surface-variant)', lineHeight: 1.5 }}>
+                  Cria 980 posições: introdução/FWC e 48 seleções com 20 figurinhas por time.
+                </p>
+              </Card>
+
+              {/* New album form */}
+              <Card>
+                <CardTitle>Novo álbum</CardTitle>
+                <form style={{ display: 'flex', flexDirection: 'column', gap: 10 }} onSubmit={handleCreateAlbum}>
+                  <TextField label="Nome" value={albumForm.name} onChange={(name) => setAlbumForm({ ...albumForm, name })} />
+                  <TextField label="Editora" value={albumForm.publisher} onChange={(publisher) => setAlbumForm({ ...albumForm, publisher })} />
+                  <TextField label="Ano/temporada" value={albumForm.season} onChange={(season) => setAlbumForm({ ...albumForm, season })} />
+                  <TextField label="URL da capa" value={albumForm.cover_url} onChange={(cover_url) => setAlbumForm({ ...albumForm, cover_url })} />
+                  <NumberField label="Total de figurinhas" min={1} onChange={(total_stickers) => setAlbumForm({ ...albumForm, total_stickers })} value={albumForm.total_stickers} />
+                  <button
+                    type="submit"
+                    disabled={saving}
+                    className="btn-brut"
+                    style={{ width: '100%', borderRadius: 'var(--radius)', background: 'var(--on-surface)', border: '2px solid var(--on-surface)', padding: '12px 18px', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--inverse-on-surface)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, boxShadow: 'var(--shadow-brutalist)' }}
+                  >
+                    <MatIcon name="add_circle" size={16} color="var(--inverse-on-surface)" />
+                    Criar álbum
+                  </button>
+                </form>
+              </Card>
+
+              {/* Collaborators */}
+              {selectedAlbum && session && isAlbumOwner && (
+                <Card>
+                  <CardTitle>Colaboradores</CardTitle>
+                  <form style={{ display: 'flex', flexDirection: 'column', gap: 10 }} onSubmit={handleInviteMember}>
+                    <label style={{ display: 'block' }}>
+                      <span className="label-caps" style={{ color: 'var(--on-surface-variant)', display: 'block', marginBottom: 6 }}>Tipo de convite</span>
+                      <select
+                        style={{ width: '100%', borderRadius: 'var(--radius)', border: '2px solid var(--outline-variant)', padding: '10px 14px', fontFamily: 'var(--font-body)', fontSize: 15, color: 'var(--on-surface)', background: 'var(--surface-container-lowest)', outline: 'none' }}
+                        onChange={(e) => setInviteForm({ type: e.target.value as InviteType, value: '' })}
+                        value={inviteForm.type}
+                      >
+                        <option value="email">E-mail</option>
+                        <option value="username">Username</option>
+                        <option value="phone">Telefone</option>
+                        <option value="link">Magic link</option>
+                      </select>
+                    </label>
+                    {inviteForm.type !== 'link' && (
+                      <TextField
+                        label={inviteForm.type === 'phone' ? 'Telefone' : inviteForm.type === 'username' ? 'Username' : 'E-mail'}
+                        value={inviteForm.value}
+                        onChange={(value) => setInviteForm({ ...inviteForm, value })}
+                      />
+                    )}
+                    <SecondaryButton full disabled={saving} icon="person_add">Convidar editor</SecondaryButton>
+                  </form>
+                  {inviteLink && (
+                    <div style={{ marginTop: 12, borderRadius: 'var(--radius)', border: '2px solid var(--primary)', background: 'var(--primary-container)', padding: 12 }}>
+                      <div className="label-caps" style={{ color: 'var(--on-primary-container)', display: 'block', marginBottom: 4 }}>Magic link criado</div>
+                      <p style={{ fontFamily: 'var(--font-mono)', fontSize: 11, wordBreak: 'break-all', color: 'var(--on-primary-container)', margin: 0, lineHeight: 1.4 }}>{inviteLink}</p>
+                    </div>
+                  )}
+                  {members.length > 0 && (
+                    <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {members.map((m) => (
+                        <div key={m.id} style={{ borderRadius: 'var(--radius)', background: 'var(--surface-container)', padding: '8px 12px' }}>
+                          <div style={{ fontFamily: 'var(--font-body)', fontWeight: 600, fontSize: 14, color: 'var(--on-surface)' }}>
+                            {m.invite_type === 'link' && !m.invite_value ? 'Magic link pendente' : m.invite_value || m.email || m.user_id || 'Colaborador'}
+                          </div>
+                          <div className="label-caps" style={{ fontSize: 9, color: 'var(--on-surface-variant)', marginTop: 2 }}>
+                            {m.role} · {m.invite_type}{m.accepted_at ? ' · aceito' : ''}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </Card>
+              )}
+            </aside>
+
+            {/* ══ MAIN CONTENT ════════════════════════════════════ */}
+            <section className={`space-y-4 screen-in ${mobileTab === 'home' ? 'hidden lg:block' : 'block'}`}>
+
+              {/* Album header */}
+              {selectedAlbum ? (
+                <Card>
+                  <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 22, lineHeight: 1.2, color: 'var(--on-surface)' }}>{selectedAlbum.name}</div>
+                      <div className="label-caps" style={{ fontSize: 10, color: 'var(--on-surface-variant)', marginTop: 4 }}>
+                        {stats.totalRegistered} figurinhas no catálogo
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 6, marginTop: 12 }}>
+                        <StatChip label="Tenho" value={stats.owned} color="var(--primary)" />
+                        <StatChip label="Faltam" value={stats.missing} color="var(--error)" />
+                        <StatChip label="Coladas" value={stats.stuck} color="var(--on-surface-variant)" />
+                        <StatChip label="Trocas" value={stats.duplicates} color="var(--secondary)" />
+                      </div>
+                    </div>
+                    <ProgressRing pct={stats.completion} label={`${stats.completion}%`} sub={`${stats.owned}/${Math.max(selectedAlbum.total_stickers, stats.totalRegistered)}`} size={88} />
+                  </div>
+                  <div style={{ marginTop: 14 }}>
+                    <ProgressSegments pct={stats.completion} />
+                  </div>
+                </Card>
+              ) : (
+                <Card>
+                  <EmptyState icon="library_books" title="Nenhum álbum selecionado" description="Vá para Início e selecione ou crie um álbum." />
+                </Card>
+              )}
+
+              {/* Desktop view tabs */}
+              <div className="hidden lg:flex" style={{ gap: 4, background: 'var(--surface-container-lowest)', border: '2px solid var(--outline-variant)', borderRadius: 'var(--radius-lg)', padding: 6, boxShadow: 'var(--shadow-card)' }}>
+                {DESKTOP_VIEW_TABS.map(({ id, icon, label }) => {
+                  const active = viewMode === id;
+                  return (
+                    <button key={id} onClick={() => { setViewMode(id); if (id !== 'scan') stopCamera(); }}
+                      style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '10px 14px', borderRadius: 'var(--radius)', border: 'none', cursor: 'pointer', background: active ? 'var(--on-surface)' : 'transparent', color: active ? 'var(--inverse-on-surface)' : 'var(--on-surface-variant)', fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', transition: 'all 0.15s' }}>
+                      <MatIcon name={icon} size={16} fill={active} color={active ? 'var(--inverse-on-surface)' : 'var(--on-surface-variant)'} />
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* ── SCAN VIEW ──────────────────────────────────── */}
+              {viewMode === 'scan' && selectedAlbum && (
+                <div className="grid gap-4 xl:grid-cols-[1fr_300px]">
+                  <Card>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+                      <CardTitle>Ler figurinha</CardTitle>
+                      <button
+                        onClick={scanRunning ? stopCamera : startCamera}
+                        style={{ borderRadius: 'var(--radius)', border: '2px solid var(--outline)', padding: '8px 14px', fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', background: scanRunning ? 'var(--error-container)' : 'var(--primary-container)', color: scanRunning ? 'var(--on-error-container)' : 'var(--on-primary-container)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+                      >
+                        <MatIcon name={scanRunning ? 'stop_circle' : 'qr_code_scanner'} size={16} />
+                        {scanRunning ? 'Parar' : 'Câmera'}
+                      </button>
+                    </div>
+                    <div style={{ borderRadius: 'var(--radius-lg)', overflow: 'hidden', border: '2px solid var(--outline-variant)', background: 'var(--on-surface)', aspectRatio: '16/9' }}>
+                      <video style={{ width: '100%', height: '100%', objectFit: 'cover' }} muted playsInline ref={videoRef} />
+                    </div>
+                    {cameraMessage && <p style={{ marginTop: 10, fontSize: 13, color: 'var(--tertiary)', fontFamily: 'var(--font-body)' }}>{cameraMessage}</p>}
+                    <form style={{ marginTop: 14, display: 'flex', gap: 8 }} onSubmit={(e) => { e.preventDefault(); registerCode(manualCode); }}>
+                      <input
+                        style={{ flex: 1, borderRadius: 'var(--radius)', border: '2px solid var(--outline-variant)', padding: '11px 14px', fontFamily: 'var(--font-mono)', fontSize: 14, fontWeight: 600, textTransform: 'uppercase', color: 'var(--on-surface)', background: 'var(--surface-container-lowest)', outline: 'none' }}
+                        onChange={(e) => setManualCode(e.target.value)}
+                        placeholder="Código da figurinha"
+                        value={manualCode}
+                        onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--primary)'; }}
+                        onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--outline-variant)'; }}
+                      />
+                      <PrimaryButton disabled={saving} icon="add">+1</PrimaryButton>
+                    </form>
+                  </Card>
+                  <ScanResultCard lastScan={lastScan} />
+                </div>
+              )}
+
+              {/* ── TEAMS VIEW ─────────────────────────────────── */}
+              {viewMode === 'teams' && selectedAlbum && (
+                <div className="grid gap-4 xl:grid-cols-[260px_1fr]">
+                  {/* Team selector */}
+                  <Card style={{ padding: 12 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, padding: '0 4px' }}>
+                      <CardTitle>Times</CardTitle>
+                      <span className="label-caps" style={{ fontSize: 10, color: 'var(--on-surface-variant)' }}>{teams.length}</span>
+                    </div>
+                    {teams.length === 0 ? (
+                      <EmptyState icon="groups" title="Sem times" description="Adicione figurinhas com o campo Seção preenchido." />
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {teams.map((team) => {
+                          const active = activeTeam === team.name;
+                          return (
+                            <button
+                              key={team.name}
+                              onClick={() => setSelectedTeam(team.name)}
+                              style={{ width: '100%', textAlign: 'left', borderRadius: 'var(--radius)', border: active ? '2px solid var(--primary)' : '2px solid var(--outline-variant)', background: active ? 'var(--primary-container)' : 'var(--surface-container-lowest)', padding: '10px 12px', cursor: 'pointer', transition: 'all 0.15s', boxShadow: active ? '4px 4px 0 0 var(--primary)' : 'none' }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                <div>
+                                  <div style={{ fontFamily: 'var(--font-body)', fontWeight: 600, fontSize: 14, color: active ? 'var(--on-primary-container)' : 'var(--on-surface)' }}>{team.name}</div>
+                                  <div className="label-caps" style={{ fontSize: 9, color: active ? 'var(--on-primary-container)' : 'var(--on-surface-variant)', marginTop: 2 }}>
+                                    {team.owned}/{team.total} · {team.stuck} coladas
+                                  </div>
+                                </div>
+                                {team.duplicates > 0 && (
+                                  <span style={{ borderRadius: 'var(--radius-full)', background: 'var(--secondary-container)', padding: '3px 8px', fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600, color: 'var(--on-secondary-container)', flexShrink: 0 }}>+{team.duplicates}</span>
+                                )}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </Card>
+
+                  {/* Sticker grid */}
+                  <Card style={{ padding: 0, overflow: 'hidden' }}>
+                    <div style={{ borderBottom: '2px solid var(--outline-variant)', padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div>
+                        <div style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 18 }}>{activeTeam || 'Time'}</div>
+                        <div className="label-caps" style={{ fontSize: 10, color: 'var(--on-surface-variant)', marginTop: 2 }}>Toque em uma vaga para marcar como coletada</div>
+                      </div>
+                      {teamStickers.length > 0 && (
+                        <span className="label-caps" style={{ fontSize: 10, color: 'var(--on-surface-variant)' }}>
+                          {teamStickers.filter(s => s.quantity > 0).length}/{teamStickers.length}
+                        </span>
+                      )}
+                    </div>
+                    {teamStickers.length === 0 ? (
+                      <EmptyState icon="style" title="Sem figurinhas neste time" description="Use o catálogo para cadastrar as figurinhas por time." />
+                    ) : (
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(90px, 1fr))', gap: 'var(--space-sticker-gap)', padding: 12 }}>
+                        {teamStickers.map((s) => (
+                          <TeamStickerCard key={s.id} onPatch={(p) => patchSticker(s, p)} sticker={s} />
+                        ))}
+                      </div>
+                    )}
+                  </Card>
+                </div>
+              )}
+
+              {/* ── CATALOG VIEW ───────────────────────────────── */}
+              {viewMode === 'catalog' && selectedAlbum && (
+                <>
+                  <div className="grid gap-4 xl:grid-cols-2">
+                    <Card>
+                      <CardTitle>Adicionar ao catálogo</CardTitle>
+                      <form style={{ display: 'flex', flexDirection: 'column', gap: 10 }} onSubmit={handleCreateCatalogSticker}>
+                        <div className="grid grid-cols-2 gap-3">
+                          <TextField label="Código" value={catalogForm.code} onChange={(code) => setCatalogForm({ ...catalogForm, code })} />
+                          <TextField label="Seção" value={catalogForm.section} onChange={(section) => setCatalogForm({ ...catalogForm, section })} />
+                        </div>
+                        <TextField label="Título" value={catalogForm.title} onChange={(title) => setCatalogForm({ ...catalogForm, title })} />
+                        <PrimaryButton disabled={saving} icon="add">Salvar figurinha</PrimaryButton>
+                      </form>
+                    </Card>
+
+                    <Card>
+                      <CardTitle>Gerar sequência</CardTitle>
+                      <form style={{ display: 'flex', flexDirection: 'column', gap: 10 }} onSubmit={handleGenerateCatalog}>
+                        <div className="grid grid-cols-2 gap-3">
+                          <TextField label="Prefixo" value={generatorForm.prefix} onChange={(prefix) => setGeneratorForm({ ...generatorForm, prefix })} />
+                          <NumberField label="Início" min={1} onChange={(start) => setGeneratorForm({ ...generatorForm, start })} value={generatorForm.start} />
+                        </div>
+                        <div className="grid grid-cols-3 gap-3">
+                          <NumberField label="Qtd." min={1} onChange={(count) => setGeneratorForm({ ...generatorForm, count })} value={generatorForm.count} />
+                          <NumberField label="Dígitos" min={1} onChange={(padding) => setGeneratorForm({ ...generatorForm, padding })} value={generatorForm.padding} />
+                          <TextField label="Seção" value={generatorForm.section} onChange={(section) => setGeneratorForm({ ...generatorForm, section })} />
+                        </div>
+                        <SecondaryButton full disabled={saving} icon="auto_awesome">Gerar</SecondaryButton>
+                      </form>
+                    </Card>
+                  </div>
+
+                  <CatalogToolbar filter={filter} query={query} setFilter={setFilter} setQuery={setQuery} />
+                  <StickerTable loading={loading} onPatch={patchSticker} stickers={filteredStickers} />
+                </>
+              )}
+
+              {/* ── TRADES VIEW ────────────────────────────────── */}
+              {viewMode === 'trades' && (
+                <Card style={{ padding: 0, overflow: 'hidden' }}>
+                  <div style={{ borderBottom: '2px solid var(--outline-variant)', padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                    <div>
+                      <div style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 18 }}>Disponíveis para troca</div>
+                      <div className="label-caps" style={{ fontSize: 10, color: 'var(--on-surface-variant)', marginTop: 2 }}>
+                        {duplicates.length} modelos · {stats.duplicates} figurinhas extras
+                      </div>
+                    </div>
+                    {duplicates.length > 0 && (
+                      <span style={{ borderRadius: 'var(--radius-full)', background: 'var(--secondary-container)', padding: '6px 14px', fontFamily: 'var(--font-mono)', fontSize: 14, fontWeight: 600, color: 'var(--on-secondary-container)' }}>
+                        {stats.duplicates}
+                      </span>
+                    )}
+                  </div>
+                  {duplicates.length === 0 ? (
+                    <EmptyState icon="sync_alt" title="Nenhuma repetida" description="Quando uma quantidade passar de 1, ela aparece aqui para troca." />
+                  ) : (
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12, padding: 16 }}>
+                      {duplicates.map((s) => (
+                        <article key={s.id} className="hover-lift" style={{ borderRadius: 'var(--radius-md)', border: '2px solid var(--outline-variant)', background: 'var(--surface-container-lowest)', padding: 12, boxShadow: 'var(--shadow-card)', position: 'relative' }}>
+                          <span style={{ position: 'absolute', top: -8, right: 10, background: 'var(--secondary)', color: '#fff', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, padding: '3px 10px', borderRadius: 'var(--radius-full)', border: '2px solid #fff', zIndex: 10 }}>
+                            {s.quantity - 1}× troca
+                          </span>
+                          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+                            <div style={{ width: 52, flexShrink: 0 }}>
+                              <StickerVisual compact sticker={s} />
+                            </div>
+                            <div style={{ minWidth: 0 }}>
+                              <div className="label-caps" style={{ fontSize: 10, color: 'var(--on-surface-variant)' }}>{s.code}</div>
+                              <div style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 14, color: 'var(--on-surface)', lineHeight: 1.2, marginTop: 2 }}>{s.title}</div>
+                              <div style={{ fontSize: 12, color: 'var(--on-surface-variant)', marginTop: 2 }}>{s.section || 'Sem seção'}</div>
+                            </div>
+                          </div>
+                          <button
+                            style={{ width: '100%', marginTop: 10, borderRadius: 'var(--radius)', border: '2px solid var(--outline-variant)', background: 'transparent', padding: '8px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', cursor: 'pointer', color: 'var(--on-surface)', transition: 'all 0.15s', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}
+                            onClick={() => patchSticker(s, { quantity: Math.max(s.quantity - 1, 0), owned: s.quantity - 1 > 0 })}
+                          >
+                            <MatIcon name="check_circle" size={14} color="var(--primary)" />
+                            Troca feita
+                          </button>
+                        </article>
+                      ))}
+                    </div>
+                  )}
+                </Card>
+              )}
+            </section>
+          </div>
+        </div>
       </div>
-      <div className="mt-2 flex items-center justify-between gap-2">
-        <span className="truncate text-xs font-medium text-zinc-700">{sticker.section || 'Sem time'}</span>
-        <span className="font-mono text-xs font-semibold text-zinc-500">{sticker.code}</span>
-      </div>
-      <div className="mt-2 flex flex-wrap gap-1">
-        {sticker.quantity > 0 && <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[11px] font-semibold text-emerald-800">tenho</span>}
-        {sticker.is_stuck && <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-semibold text-emerald-900">colada</span>}
-        {extraCount > 0 && <span className="rounded bg-sky-100 px-1.5 py-0.5 text-[11px] font-semibold text-sky-800">+{extraCount}</span>}
-      </div>
+
+      {/* ── MOBILE BOTTOM NAV ─────────────────────────────────────── */}
+      <nav
+        className="lg:hidden"
+        style={{ position: 'fixed', bottom: 0, left: 0, right: 0, background: 'rgba(248,249,255,0.96)', backdropFilter: 'blur(16px)', borderTop: '2px solid var(--outline-variant)', display: 'flex', justifyContent: 'space-around', alignItems: 'center', padding: '6px 4px calc(6px + env(safe-area-inset-bottom))', zIndex: 50, boxShadow: '0 -4px 0 0 rgba(0,0,0,.04)' }}
+      >
+        {NAV_TABS.map(({ id, icon, label }) => {
+          const active = mobileTab === id;
+          return (
+            <button
+              key={id}
+              onClick={() => handleMobileTab(id)}
+              style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3, padding: '6px 8px', borderRadius: 'var(--radius)', border: 'none', cursor: 'pointer', background: active ? 'var(--primary-container)' : 'transparent', color: active ? 'var(--on-primary-container)' : 'var(--on-surface-variant)', transition: 'all 0.2s', transform: active ? 'scale(1.05)' : 'none', minWidth: 52, outline: 'none' }}
+            >
+              <MatIcon name={icon} size={24} fill={active} color={active ? 'var(--on-primary-container)' : 'var(--on-surface-variant)'} />
+              <span className="label-caps" style={{ fontSize: 9, color: active ? 'var(--on-primary-container)' : 'var(--on-surface-variant)' }}>{label}</span>
+            </button>
+          );
+        })}
+      </nav>
     </div>
-  );
-}
-
-function TeamStickerCard({ onPatch, sticker }: { onPatch: (patch: StickerPatch) => void; sticker: Sticker }) {
-  const isOwned = sticker.quantity > 0;
-  const canStick = isOwned || sticker.is_stuck;
-
-  return (
-    <article className={`rounded-lg border p-4 ${sticker.is_stuck ? 'border-emerald-500 bg-emerald-50' : 'border-slate-200 bg-white'}`}>
-      <StickerVisual sticker={sticker} />
-
-      <div className="mt-4 grid grid-cols-2 gap-2">
-        <button
-          className={`rounded-md border px-3 py-2 text-sm font-medium ${
-            isOwned ? 'border-emerald-300 bg-emerald-100 text-emerald-800' : 'border-zinc-300 hover:bg-zinc-50'
-          }`}
-          onClick={() => onPatch({ quantity: isOwned ? 0 : 1, owned: !isOwned, is_stuck: isOwned ? false : sticker.is_stuck })}
-          type="button"
-        >
-          {isOwned ? 'Tenho' : 'Marcar tenho'}
-        </button>
-        <button
-          className={`rounded-md border px-3 py-2 text-sm font-medium ${
-            sticker.is_stuck ? 'border-emerald-500 bg-emerald-600 text-white' : 'border-zinc-300 hover:bg-zinc-50'
-          }`}
-          disabled={!canStick}
-          onClick={() => onPatch({ is_stuck: !sticker.is_stuck, quantity: sticker.quantity || 1, owned: true, wishlisted: false })}
-          type="button"
-        >
-          {sticker.is_stuck ? 'Colada' : 'Colar'}
-        </button>
-      </div>
-
-      <div className="mt-3 flex items-center justify-between rounded-md bg-white/80 px-3 py-2">
-        <span className="text-sm text-zinc-600">Quantidade</span>
-        <div className="flex items-center gap-2">
-          <button
-            aria-label="Diminuir quantidade"
-            className="grid h-8 w-8 place-items-center rounded-md border border-zinc-300 text-lg leading-none hover:bg-white"
-            onClick={() => onPatch({ quantity: Math.max(sticker.quantity - 1, 0), owned: sticker.quantity - 1 > 0, is_stuck: sticker.quantity - 1 > 0 ? sticker.is_stuck : false })}
-            type="button"
-          >
-            -
-          </button>
-          <span className="w-8 text-center font-medium">{sticker.quantity}</span>
-          <button
-            aria-label="Aumentar quantidade"
-            className="grid h-8 w-8 place-items-center rounded-md border border-zinc-300 text-lg leading-none hover:bg-white"
-            onClick={() => onPatch({ quantity: sticker.quantity + 1, owned: true, wishlisted: false })}
-            type="button"
-          >
-            +
-          </button>
-        </div>
-      </div>
-      {sticker.quantity > 1 && <p className="mt-2 text-sm font-medium text-sky-700">{sticker.quantity - 1} para troca</p>}
-    </article>
-  );
-}
-
-function StickerRow({ onPatch, sticker }: { onPatch: (patch: StickerPatch) => void; sticker: Sticker }) {
-  const isOwned = sticker.quantity > 0;
-
-  return (
-    <article className="grid gap-3 px-4 py-4 lg:grid-cols-[110px_1fr_120px_150px_120px_90px] lg:items-center">
-      <div>
-        <p className="text-xs font-semibold uppercase text-zinc-500 lg:hidden">Codigo</p>
-        <p className="font-mono text-sm font-semibold text-zinc-900">{sticker.code}</p>
-      </div>
-      <div className="min-w-0">
-        <div className="flex items-center gap-3">
-          <div className="w-16 shrink-0">
-            <StickerVisual compact sticker={sticker} />
-          </div>
-          <div className="min-w-0">
-            <p className="font-medium text-zinc-950">{sticker.title}</p>
-            <p className="text-sm text-zinc-500">{sticker.section || 'Sem secao'}</p>
-          </div>
-        </div>
-      </div>
-      <div>
-        <span className={`rounded-full px-3 py-1 text-xs font-semibold ${isOwned ? 'bg-emerald-100 text-emerald-800' : 'bg-zinc-100 text-zinc-700'}`}>
-          {isOwned ? 'Tenho' : 'Falta'}
-        </span>
-      </div>
-      <div className="flex items-center gap-2">
-        <button
-          aria-label="Diminuir quantidade"
-          className="grid h-8 w-8 place-items-center rounded-md border border-zinc-300 text-lg leading-none hover:bg-zinc-50"
-          onClick={() => onPatch({ quantity: Math.max(sticker.quantity - 1, 0), owned: sticker.quantity - 1 > 0, is_stuck: sticker.quantity - 1 > 0 ? sticker.is_stuck : false })}
-          type="button"
-        >
-          -
-        </button>
-        <span className="w-8 text-center font-medium">{sticker.quantity}</span>
-        <button
-          aria-label="Aumentar quantidade"
-          className="grid h-8 w-8 place-items-center rounded-md border border-zinc-300 text-lg leading-none hover:bg-zinc-50"
-          onClick={() => onPatch({ quantity: sticker.quantity + 1, owned: true, wishlisted: false })}
-          type="button"
-        >
-          +
-        </button>
-        {sticker.quantity > 1 && <span className="rounded-full bg-sky-100 px-2 py-1 text-xs font-semibold text-sky-800">troca</span>}
-      </div>
-      <div>
-        <button
-          className={`rounded-md border px-3 py-2 text-sm font-medium ${
-            sticker.is_stuck ? 'border-emerald-500 bg-emerald-600 text-white' : 'border-zinc-300 hover:bg-zinc-50'
-          }`}
-          disabled={!isOwned && !sticker.is_stuck}
-          onClick={() => onPatch({ is_stuck: !sticker.is_stuck, quantity: sticker.quantity || 1, owned: true, wishlisted: false })}
-          type="button"
-        >
-          {sticker.is_stuck ? 'Colada' : 'Colar'}
-        </button>
-      </div>
-      <div>
-        <button
-          aria-label="Marcar como desejada"
-          className={`grid h-8 w-8 place-items-center rounded-md border text-sm ${
-            sticker.wishlisted ? 'border-amber-300 bg-amber-100 text-amber-800' : 'border-zinc-300 hover:bg-zinc-50'
-          }`}
-          onClick={() => onPatch({ wishlisted: !sticker.wishlisted })}
-          type="button"
-        >
-          ☆
-        </button>
-      </div>
-    </article>
   );
 }
 

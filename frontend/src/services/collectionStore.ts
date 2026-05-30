@@ -116,12 +116,6 @@ function writeSession(session: AuthSession | null) {
   return session;
 }
 
-function getCleanRedirectUrl() {
-  const url = new URL(window.location.href);
-  url.hash = '';
-  return url.toString();
-}
-
 async function getAuthUser(accessToken: string): Promise<AuthSession['user']> {
   const response = await fetch(`${supabaseAuthUrl}/user`, {
     headers: {
@@ -268,8 +262,7 @@ export const collectionStore = {
     if (!isSupabaseConfigured) {
       throw new Error('Configure o Supabase para usar login.');
     }
-    const redirectTo = encodeURIComponent(getCleanRedirectUrl());
-    await supabaseAuthRequest(`otp?redirect_to=${redirectTo}`, {
+    await supabaseAuthRequest('otp', {
       method: 'POST',
       body: JSON.stringify({
         email: email.trim().toLowerCase(),
