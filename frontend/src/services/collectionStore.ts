@@ -1,11 +1,19 @@
 import { Album, AlbumInput, CatalogStickerInput, Sticker, StickerInput, StickerPatch } from '../types/collection';
 
-const supabaseUrl = process.env.REACT_APP_SUPABASE_URL?.replace(/\/$/, '') || '';
+const configuredSupabaseUrl = process.env.REACT_APP_SUPABASE_URL?.trim().replace(/\/+$/, '') || '';
 const supabaseAnonKey = process.env.REACT_APP_SUPABASE_ANON_KEY || '';
 const localAlbumsKey = 'stickershelf.albums';
 const localStickersKey = 'stickershelf.stickers';
 
-export const isSupabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
+function getSupabaseRestUrl() {
+  if (!configuredSupabaseUrl) return '';
+  if (configuredSupabaseUrl.endsWith('/rest/v1')) return configuredSupabaseUrl;
+  return `${configuredSupabaseUrl}/rest/v1`;
+}
+
+const supabaseRestUrl = getSupabaseRestUrl();
+
+export const isSupabaseConfigured = Boolean(supabaseRestUrl && supabaseAnonKey);
 
 const now = () => new Date().toISOString();
 
@@ -99,6 +107,7 @@ function hydrateSticker(sticker: Sticker): Sticker {
 }
 
 async function supabaseRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const cleanPath = path.replace(/^\/+/, '');
   const headers = new Headers(init.headers);
   headers.set('apikey', supabaseAnonKey);
   headers.set('Authorization', `Bearer ${supabaseAnonKey}`);
@@ -107,14 +116,14 @@ async function supabaseRequest<T>(path: string, init: RequestInit = {}): Promise
     headers.set('Prefer', 'return=representation');
   }
 
-  const response = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
+  const response = await fetch(`${supabaseRestUrl}/${cleanPath}`, {
     ...init,
     headers,
   });
 
   if (!response.ok) {
     const detail = await response.text();
-    throw new Error(detail || `Supabase request failed with ${response.status}`);
+    throw new Error(detail || `Supabase request failed for /rest/v1/${cleanPath} with ${response.status}`);
   }
 
   if (response.status === 204) {
@@ -233,7 +242,7 @@ export const collectionStore = {
     }));
 
     if (isSupabaseConfigured) {
-      return supabaseRequest<Sticker[]>('stickers?on_conflict=album_id,code', {
+      return supabaseRequest<Sticker[]>('stickers?on_conflict=album_id%2Ccode', {
         method: 'POST',
         headers: {
           Prefer: 'resolution=merge-duplicates,return=representation',

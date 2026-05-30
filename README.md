@@ -54,6 +54,8 @@ REACT_APP_SUPABASE_URL=https://your-project-ref.supabase.co
 REACT_APP_SUPABASE_ANON_KEY=your-anon-key
 ```
 
+Use a URL raiz do projeto em `REACT_APP_SUPABASE_URL`, sem aspas e preferencialmente sem `/rest/v1`. O app tambem aceita a URL terminando em `/rest/v1`, mas nao use caminhos de tabela como `/rest/v1/albums`.
+
 O schema atual usa politicas publicas de leitura e escrita para simplificar o primeiro prototipo hospedado no GitHub Pages. Para uso real com dados privados, o proximo passo e adicionar autenticacao Supabase e restringir as policies por usuario.
 
 Para conectar o site publicado, configure os secrets do GitHub:
