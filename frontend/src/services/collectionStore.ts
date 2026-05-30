@@ -1,4 +1,4 @@
-import { Album, AlbumInput, Sticker, StickerInput, StickerPatch } from '../types/collection';
+import { Album, AlbumInput, CatalogStickerInput, Sticker, StickerInput, StickerPatch } from '../types/collection';
 
 const supabaseUrl = process.env.REACT_APP_SUPABASE_URL?.replace(/\/$/, '') || '';
 const supabaseAnonKey = process.env.REACT_APP_SUPABASE_ANON_KEY || '';
@@ -67,6 +67,10 @@ const seedStickers: Sticker[] = [
   },
 ];
 
+export function normalizeStickerCode(value: string) {
+  return value.trim().replace(/\s+/g, ' ').toUpperCase();
+}
+
 function readLocal<T>(key: string, fallback: T): T {
   const stored = window.localStorage.getItem(key);
   if (!stored) {
@@ -86,7 +90,9 @@ async function supabaseRequest<T>(path: string, init: RequestInit = {}): Promise
   headers.set('apikey', supabaseAnonKey);
   headers.set('Authorization', `Bearer ${supabaseAnonKey}`);
   headers.set('Content-Type', 'application/json');
-  headers.set('Prefer', 'return=representation');
+  if (!headers.has('Prefer')) {
+    headers.set('Prefer', 'return=representation');
+  }
 
   const response = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
     ...init,
@@ -115,7 +121,7 @@ const cleanAlbumInput = (input: AlbumInput) => ({
 
 const cleanStickerInput = (input: StickerInput | StickerPatch) => ({
   ...input,
-  code: input.code?.trim(),
+  code: input.code ? normalizeStickerCode(input.code) : undefined,
   title: input.title?.trim(),
   section: input.section?.trim() || null,
   image_url: input.image_url?.trim() || null,
@@ -194,6 +200,101 @@ export const collectionStore = {
     };
     writeLocal(localStickersKey, [...stickers, sticker]);
     return sticker;
+  },
+
+  async createCatalog(albumId: string, items: CatalogStickerInput[]): Promise<Sticker[]> {
+    const payload = items.map((item) => ({
+      album_id: albumId,
+      code: normalizeStickerCode(item.code),
+      title: item.title.trim(),
+      section: item.section?.trim() || null,
+      image_url: item.image_url?.trim() || null,
+      owned: false,
+      quantity: 0,
+      wishlisted: false,
+      notes: item.notes?.trim() || null,
+    }));
+
+    if (isSupabaseConfigured) {
+      return supabaseRequest<Sticker[]>('stickers?on_conflict=album_id,code', {
+        method: 'POST',
+        headers: {
+          Prefer: 'resolution=merge-duplicates,return=representation',
+        },
+        body: JSON.stringify(payload),
+      });
+    }
+
+    const stickers = readLocal<Sticker[]>(localStickersKey, seedStickers);
+    const byKey = new Map(stickers.map((sticker) => [`${sticker.album_id}:${normalizeStickerCode(sticker.code)}`, sticker]));
+    const next = [...stickers];
+    const created: Sticker[] = [];
+
+    payload.forEach((item) => {
+      const key = `${item.album_id}:${item.code}`;
+      const existing = byKey.get(key);
+      if (existing) {
+        const updated = {
+          ...existing,
+          title: item.title,
+          section: item.section,
+          image_url: item.image_url,
+          notes: item.notes,
+          updated_at: now(),
+        };
+        const index = next.findIndex((sticker) => sticker.id === existing.id);
+        next[index] = updated;
+        created.push(updated);
+        return;
+      }
+
+      const sticker: Sticker = {
+        id: crypto.randomUUID(),
+        album_id: albumId,
+        code: item.code,
+        title: item.title,
+        section: item.section,
+        image_url: item.image_url,
+        owned: false,
+        quantity: 0,
+        wishlisted: false,
+        notes: item.notes,
+        created_at: now(),
+        updated_at: now(),
+      };
+      next.push(sticker);
+      created.push(sticker);
+    });
+
+    writeLocal(localStickersKey, next);
+    return created.sort((a, b) => a.code.localeCompare(b.code));
+  },
+
+  async findStickerByCode(albumId: string, code: string): Promise<Sticker | null> {
+    const normalizedCode = normalizeStickerCode(code);
+
+    if (isSupabaseConfigured) {
+      const result = await supabaseRequest<Sticker[]>(
+        `stickers?album_id=eq.${encodeURIComponent(albumId)}&code=eq.${encodeURIComponent(normalizedCode)}&select=*&limit=1`
+      );
+      return result[0] || null;
+    }
+
+    const stickers = readLocal<Sticker[]>(localStickersKey, seedStickers);
+    return stickers.find((sticker) => sticker.album_id === albumId && normalizeStickerCode(sticker.code) === normalizedCode) || null;
+  },
+
+  async incrementSticker(albumId: string, code: string): Promise<Sticker> {
+    const sticker = await this.findStickerByCode(albumId, code);
+    if (!sticker) {
+      throw new Error(`A figurinha ${normalizeStickerCode(code)} nao existe no catalogo deste album.`);
+    }
+
+    return this.updateSticker(sticker.id, {
+      owned: true,
+      quantity: sticker.quantity + 1,
+      wishlisted: false,
+    });
   },
 
   async updateSticker(id: string, patch: StickerPatch): Promise<Sticker> {

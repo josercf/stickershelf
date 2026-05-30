@@ -46,6 +46,14 @@ export type StickerInput = {
 
 export type StickerPatch = Partial<Omit<StickerInput, 'album_id'>>;
 
+export type CatalogStickerInput = {
+  code: string;
+  title: string;
+  section?: string;
+  image_url?: string;
+  notes?: string;
+};
+
 export type CollectionStats = {
   owned: number;
   missing: number;

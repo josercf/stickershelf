@@ -1,17 +1,28 @@
 # StickerShelf
 
-Aplicativo web para gerenciar albuns de figurinhas, controlar faltantes, repetidas, lista de desejos e progresso de cada album.
+Aplicativo web para gerenciar albuns de figurinhas a partir de um catalogo-base, controlar faltantes, repetidas, lista de desejos e progresso de cada album.
 
 O frontend e estatico, feito em React + TypeScript, e pode ser hospedado no GitHub Pages. O backend usado pela aplicacao e o Supabase via REST API.
 
 ## Funcionalidades
 
 - Cadastro de albuns com editora, temporada, capa e total de figurinhas.
-- Cadastro de figurinhas por codigo, titulo, secao, quantidade e observacoes.
-- Controle rapido de figurinhas que voce tem, faltantes, repetidas e desejadas.
-- Busca por codigo, nome, secao ou observacao.
+- Catalogo de figurinhas por album, com cadastro manual ou geracao de sequencia.
+- Leitor de camera para codigos de barras/QR via `BarcodeDetector`, com campo manual de fallback.
+- Registro de figurinha lida com incremento automatico de quantidade (`+1`).
+- Controle de figurinhas que voce tem, faltantes, repetidas e desejadas.
+- Area de trocas baseada nas repetidas (`quantidade > 1`).
+- Busca por codigo, titulo ou secao.
 - Indicadores de completude, faltantes, repetidas e wishlist.
 - Modo local de demonstracao quando o Supabase ainda nao esta configurado.
+
+## Fluxo principal
+
+1. Crie ou selecione um album.
+2. Monte o catalogo do album na aba `Catalogo`.
+3. Use a aba `Leitor` para abrir a camera ou digitar o codigo.
+4. Quando a figurinha e encontrada no catalogo, a quantidade aumenta em 1.
+5. Figurinhas com quantidade maior que 1 aparecem na aba `Trocas`.
 
 ## Desenvolvimento
 
