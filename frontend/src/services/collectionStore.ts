@@ -1,4 +1,4 @@
-import { Album, AlbumInput, AlbumMember, AuthSession, CatalogStickerInput, Sticker, StickerInput, StickerPatch } from '../types/collection';
+import { Album, AlbumInput, AlbumMember, AuthSession, CatalogStickerInput, InviteType, Sticker, StickerInput, StickerPatch } from '../types/collection';
 
 const configuredSupabaseUrl = process.env.REACT_APP_SUPABASE_URL?.trim().replace(/\/+$/, '') || '';
 const supabaseAnonKey = process.env.REACT_APP_SUPABASE_ANON_KEY || '';
@@ -114,6 +114,26 @@ function writeSession(session: AuthSession | null) {
   }
   window.localStorage.setItem(sessionKey, JSON.stringify(session));
   return session;
+}
+
+function getSessionIdentityFilters(session: AuthSession) {
+  const values = [
+    session.user.email,
+    session.user.phone,
+    session.user.user_metadata?.username,
+    session.user.user_metadata?.user_name,
+    session.user.user_metadata?.name,
+  ]
+    .filter((value): value is string => Boolean(value?.trim()))
+    .map((value) => value.trim().toLowerCase());
+
+  return Array.from(new Set(values));
+}
+
+function normalizeInviteValue(type: InviteType, value: string) {
+  const trimmed = value.trim();
+  if (type === 'phone') return trimmed.replace(/[^\d+]/g, '');
+  return trimmed.toLowerCase();
 }
 
 function hydrateSticker(sticker: Sticker): Sticker {
@@ -233,8 +253,13 @@ export const collectionStore = {
       if (!session) return [];
       const userId = encodeURIComponent(session.user.id);
       const ownAlbums = await supabaseRequest<Album[]>(`albums?owner_id=eq.${userId}&select=*&order=updated_at.desc`);
+      const identityFilters = getSessionIdentityFilters(session);
+      const memberFilters = [`user_id.eq.${encodeURIComponent(session.user.id)}`];
+      if (identityFilters.length) {
+        memberFilters.push(`invite_value.in.(${identityFilters.map(encodeURIComponent).join(',')})`);
+      }
       const memberships = await supabaseRequest<AlbumMember[]>(
-        `album_members?email=eq.${encodeURIComponent(session.user.email || '')}&select=album_id`
+        `album_members?or=(${memberFilters.join(',')})&select=album_id`
       );
       const invitedIds = memberships.map((member) => member.album_id).filter(Boolean);
       if (!invitedIds.length) return ownAlbums;
@@ -288,14 +313,24 @@ export const collectionStore = {
   },
 
   async inviteMember(albumId: string, email: string, role: AlbumMember['role'] = 'editor'): Promise<AlbumMember> {
+    return this.inviteCollaborator(albumId, 'email', email, role);
+  },
+
+  async inviteCollaborator(albumId: string, inviteType: InviteType, inviteValue: string, role: AlbumMember['role'] = 'editor'): Promise<AlbumMember> {
+    const token = inviteType === 'link' ? crypto.randomUUID() : null;
+    const normalizedValue = inviteType === 'link' ? null : normalizeInviteValue(inviteType, inviteValue);
     const payload = {
       album_id: albumId,
-      email: email.trim().toLowerCase(),
+      email: inviteType === 'email' ? normalizedValue : null,
+      invite_type: inviteType,
+      invite_value: normalizedValue,
+      invite_token: token,
       role,
     };
 
     if (isSupabaseConfigured) {
-      const [member] = await supabaseRequest<AlbumMember[]>('album_members?on_conflict=album_id%2Cemail', {
+      const onConflict = inviteType === 'link' ? 'album_id%2Cinvite_token' : 'album_id%2Cinvite_type%2Cinvite_value';
+      const [member] = await supabaseRequest<AlbumMember[]>(`album_members?on_conflict=${onConflict}`, {
         method: 'POST',
         headers: {
           Prefer: 'resolution=merge-duplicates,return=representation',
@@ -308,8 +343,26 @@ export const collectionStore = {
     return {
       id: crypto.randomUUID(),
       ...payload,
+      user_id: null,
       created_at: now(),
+      accepted_at: null,
     };
+  },
+
+  async acceptInvite(token: string): Promise<AlbumMember | null> {
+    if (!isSupabaseConfigured || !token.trim()) return null;
+    const [member] = await supabaseRequest<AlbumMember[]>('rpc/accept_album_invite', {
+      method: 'POST',
+      body: JSON.stringify({ invite_token_value: token.trim() }),
+    });
+    return member || null;
+  },
+
+  getInviteLink(member: AlbumMember): string {
+    if (!member.invite_token) return '';
+    const url = new URL(window.location.href);
+    url.searchParams.set('invite', member.invite_token);
+    return url.toString();
   },
 
   async listStickers(albumId: string): Promise<Sticker[]> {

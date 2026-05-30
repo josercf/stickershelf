@@ -1,5 +1,5 @@
 import React, { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { Album, AlbumMember, AuthSession, CatalogStickerInput, CollectionStats, Sticker, StickerPatch } from '../types/collection';
+import { Album, AlbumMember, AuthSession, CatalogStickerInput, CollectionStats, InviteType, Sticker, StickerPatch } from '../types/collection';
 import { collectionStore, isSupabaseConfigured, normalizeStickerCode } from '../services/collectionStore';
 import { buildPaniniWorldCup2026Catalog, paniniWorldCup2026Album } from '../data/paniniWorldCup2026';
 
@@ -41,6 +41,11 @@ const emptyLoginForm = {
   token: '',
 };
 
+const emptyInviteForm: { type: InviteType; value: string } = {
+  type: 'email',
+  value: '',
+};
+
 function getStats(album: Album | undefined, stickers: Sticker[]): CollectionStats {
   const owned = stickers.filter((sticker) => sticker.quantity > 0).length;
   const duplicates = stickers.reduce((sum, sticker) => sum + Math.max(sticker.quantity - 1, 0), 0);
@@ -79,7 +84,8 @@ function HomePage() {
   const [generatorForm, setGeneratorForm] = useState(emptyGeneratorForm);
   const [manualCode, setManualCode] = useState('');
   const [loginForm, setLoginForm] = useState(emptyLoginForm);
-  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteForm, setInviteForm] = useState(emptyInviteForm);
+  const [inviteLink, setInviteLink] = useState('');
   const [session, setSession] = useState<AuthSession | null>(() => collectionStore.getSession());
   const [members, setMembers] = useState<AlbumMember[]>([]);
   const [loginStep, setLoginStep] = useState<'email' | 'token'>('email');
@@ -97,6 +103,8 @@ function HomePage() {
   const scanLockRef = useRef(false);
 
   const selectedAlbum = albums.find((album) => album.id === selectedAlbumId);
+  const isAlbumOwner = Boolean(selectedAlbum && session?.user.id && selectedAlbum.owner_id === session.user.id);
+  const pendingInviteToken = new URLSearchParams(window.location.search).get('invite');
   const stats = useMemo(() => getStats(selectedAlbum, stickers), [selectedAlbum, stickers]);
   const duplicates = useMemo(() => stickers.filter((sticker) => sticker.quantity > 1), [stickers]);
   const [selectedTeam, setSelectedTeam] = useState('');
@@ -203,6 +211,31 @@ function HomePage() {
     loadMembers();
   }, [selectedAlbumId, session]);
 
+  useEffect(() => {
+    async function acceptPendingInvite() {
+      const inviteToken = new URLSearchParams(window.location.search).get('invite');
+      if (!inviteToken || !session) return;
+
+      try {
+        setSaving(true);
+        setError('');
+        const member = await collectionStore.acceptInvite(inviteToken);
+        window.history.replaceState({}, document.title, `${window.location.pathname}${window.location.hash}`);
+        if (member) {
+          await loadAlbums();
+          setSelectedAlbumId(member.album_id);
+          setMembers(await collectionStore.listMembers(member.album_id));
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Nao foi possivel aceitar o convite.');
+      } finally {
+        setSaving(false);
+      }
+    }
+
+    acceptPendingInvite();
+  }, [session]);
+
   useEffect(() => stopCamera, []);
 
   async function reloadStickers(albumId = selectedAlbumId) {
@@ -272,13 +305,14 @@ function HomePage() {
 
   async function handleInviteMember(event: FormEvent) {
     event.preventDefault();
-    if (!selectedAlbumId || !inviteEmail.trim()) return;
+    if (!selectedAlbumId || (!inviteForm.value.trim() && inviteForm.type !== 'link')) return;
 
     try {
       setSaving(true);
       setError('');
-      await collectionStore.inviteMember(selectedAlbumId, inviteEmail, 'editor');
-      setInviteEmail('');
+      const member = await collectionStore.inviteCollaborator(selectedAlbumId, inviteForm.type, inviteForm.value, 'editor');
+      setInviteLink(member.invite_token ? collectionStore.getInviteLink(member) : '');
+      setInviteForm(emptyInviteForm);
       setMembers(await collectionStore.listMembers(selectedAlbumId));
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Nao foi possivel convidar colaborador.');
@@ -514,6 +548,9 @@ function HomePage() {
               </div>
             ) : loginStep === 'email' ? (
               <form className="space-y-3" onSubmit={handleRequestLogin}>
+                {pendingInviteToken && (
+                  <p className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-900">Entre para aceitar o convite do album.</p>
+                )}
                 <TextField label="E-mail" value={loginForm.email} onChange={(email) => setLoginForm({ ...loginForm, email })} />
                 <button className="w-full rounded-md bg-emerald-700 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-800" disabled={saving} type="submit">
                   Enviar codigo
@@ -597,20 +634,49 @@ function HomePage() {
             </form>
           </section>
 
-          {selectedAlbum && session && (
+          {selectedAlbum && session && isAlbumOwner && (
             <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
               <h2 className="mb-3 text-base font-semibold">Colaboradores</h2>
               <form className="space-y-3" onSubmit={handleInviteMember}>
-                <TextField label="E-mail" value={inviteEmail} onChange={setInviteEmail} />
+                <label className="block text-sm font-medium text-zinc-700">
+                  Tipo de convite
+                  <select
+                    className="mt-1 w-full rounded-md border border-zinc-300 px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+                    onChange={(event) => setInviteForm({ type: event.target.value as InviteType, value: '' })}
+                    value={inviteForm.type}
+                  >
+                    <option value="email">E-mail</option>
+                    <option value="username">Username</option>
+                    <option value="phone">Telefone</option>
+                    <option value="link">Magic link</option>
+                  </select>
+                </label>
+                {inviteForm.type !== 'link' && (
+                  <TextField
+                    label={inviteForm.type === 'phone' ? 'Telefone' : inviteForm.type === 'username' ? 'Username' : 'E-mail'}
+                    value={inviteForm.value}
+                    onChange={(value) => setInviteForm({ ...inviteForm, value })}
+                  />
+                )}
                 <button className="w-full rounded-md bg-zinc-950 px-3 py-2 text-sm font-medium text-white hover:bg-zinc-800" disabled={saving} type="submit">
                   Convidar editor
                 </button>
               </form>
+              {inviteLink && (
+                <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-950">
+                  <p className="font-medium">Magic link criado</p>
+                  <p className="mt-1 break-all text-xs">{inviteLink}</p>
+                </div>
+              )}
               <div className="mt-4 space-y-2">
                 {members.map((member) => (
                   <div className="rounded-md bg-zinc-50 px-3 py-2 text-sm" key={member.id}>
-                    <p className="font-medium text-zinc-800">{member.email}</p>
-                    <p className="text-xs uppercase text-zinc-500">{member.role}</p>
+                    <p className="font-medium text-zinc-800">
+                      {member.invite_type === 'link' && !member.invite_value ? 'Magic link pendente' : member.invite_value || member.email || member.user_id || 'Colaborador'}
+                    </p>
+                    <p className="text-xs uppercase text-zinc-500">
+                      {member.role} - {member.invite_type}{member.accepted_at ? ' aceito' : ''}
+                    </p>
                   </div>
                 ))}
               </div>

@@ -18,11 +18,31 @@ add column if not exists owner_id uuid references auth.users(id) on delete set n
 create table if not exists public.album_members (
   id uuid primary key default gen_random_uuid(),
   album_id uuid not null references public.albums(id) on delete cascade,
-  email text not null,
+  user_id uuid references auth.users(id) on delete cascade,
+  email text,
+  invite_type text not null default 'email' check (invite_type in ('email', 'username', 'phone', 'link')),
+  invite_value text,
+  invite_token uuid,
+  accepted_at timestamptz,
   role text not null default 'editor' check (role in ('owner', 'editor', 'viewer')),
-  created_at timestamptz not null default now(),
-  unique (album_id, email)
+  created_at timestamptz not null default now()
 );
+
+alter table public.album_members
+add column if not exists user_id uuid references auth.users(id) on delete cascade,
+add column if not exists invite_type text not null default 'email' check (invite_type in ('email', 'username', 'phone', 'link')),
+add column if not exists invite_value text,
+add column if not exists invite_token uuid,
+add column if not exists accepted_at timestamptz;
+
+alter table public.album_members
+alter column email drop not null;
+
+update public.album_members
+set invite_type = 'email',
+    invite_value = lower(email)
+where invite_value is null
+  and email is not null;
 
 create table if not exists public.stickers (
   id uuid primary key default gen_random_uuid(),
@@ -45,6 +65,31 @@ create index if not exists stickers_album_id_idx on public.stickers(album_id);
 create index if not exists stickers_album_code_idx on public.stickers(album_id, code);
 create index if not exists album_members_album_id_idx on public.album_members(album_id);
 create index if not exists album_members_email_idx on public.album_members(lower(email));
+create index if not exists album_members_user_id_idx on public.album_members(user_id);
+create index if not exists album_members_invite_value_idx on public.album_members(invite_type, lower(invite_value));
+create unique index if not exists album_members_identity_key
+on public.album_members(album_id, invite_type, invite_value)
+where invite_value is not null;
+create unique index if not exists album_members_token_key
+on public.album_members(album_id, invite_token)
+where invite_token is not null;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_constraint where conname = 'album_members_invite_identity_unique'
+  ) then
+    alter table public.album_members
+    add constraint album_members_invite_identity_unique unique (album_id, invite_type, invite_value);
+  end if;
+
+  if not exists (
+    select 1 from pg_constraint where conname = 'album_members_invite_token_unique'
+  ) then
+    alter table public.album_members
+    add constraint album_members_invite_token_unique unique (album_id, invite_token);
+  end if;
+end $$;
 
 alter table public.stickers
 add column if not exists is_stuck boolean not null default false;
@@ -67,6 +112,105 @@ create trigger stickers_set_updated_at
 before update on public.stickers
 for each row execute function public.set_updated_at();
 
+create or replace function public.current_invite_values()
+returns text[]
+stable
+language sql
+as $$
+  select array_remove(array[
+    lower(nullif(auth.jwt() ->> 'email', '')),
+    nullif(regexp_replace(coalesce(auth.jwt() ->> 'phone', ''), '[^\d+]', '', 'g'), ''),
+    lower(nullif(auth.jwt() -> 'user_metadata' ->> 'username', '')),
+    lower(nullif(auth.jwt() -> 'user_metadata' ->> 'user_name', '')),
+    lower(nullif(auth.jwt() -> 'user_metadata' ->> 'name', '')),
+    lower(nullif(auth.jwt() -> 'raw_user_meta_data' ->> 'username', '')),
+    lower(nullif(auth.jwt() -> 'raw_user_meta_data' ->> 'user_name', '')),
+    lower(nullif(auth.jwt() -> 'raw_user_meta_data' ->> 'name', ''))
+  ], null);
+$$;
+
+create or replace function public.can_read_album(album_id_value uuid)
+returns boolean
+stable
+security definer
+set search_path = public
+language sql
+as $$
+  select exists (
+    select 1
+    from public.albums a
+    where a.id = album_id_value
+      and (
+        a.owner_id = auth.uid()
+        or exists (
+          select 1
+          from public.album_members am
+          where am.album_id = a.id
+            and (
+              am.user_id = auth.uid()
+              or lower(coalesce(am.invite_value, am.email, '')) = any(public.current_invite_values())
+            )
+        )
+      )
+  );
+$$;
+
+create or replace function public.can_edit_album(album_id_value uuid)
+returns boolean
+stable
+security definer
+set search_path = public
+language sql
+as $$
+  select exists (
+    select 1
+    from public.albums a
+    where a.id = album_id_value
+      and (
+        a.owner_id = auth.uid()
+        or exists (
+          select 1
+          from public.album_members am
+          where am.album_id = a.id
+            and am.role in ('owner', 'editor')
+            and (
+              am.user_id = auth.uid()
+              or lower(coalesce(am.invite_value, am.email, '')) = any(public.current_invite_values())
+            )
+        )
+      )
+  );
+$$;
+
+create or replace function public.accept_album_invite(invite_token_value uuid)
+returns setof public.album_members
+security definer
+set search_path = public
+language plpgsql
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'Authentication required';
+  end if;
+
+  return query
+  update public.album_members
+  set user_id = auth.uid(),
+      invite_value = coalesce(
+        lower(nullif(auth.jwt() ->> 'email', '')),
+        nullif(regexp_replace(coalesce(auth.jwt() ->> 'phone', ''), '[^\d+]', '', 'g'), ''),
+        lower(nullif(auth.jwt() -> 'user_metadata' ->> 'username', '')),
+        lower(nullif(auth.jwt() -> 'raw_user_meta_data' ->> 'username', '')),
+        auth.uid()::text
+      ),
+      accepted_at = coalesce(accepted_at, now())
+  where invite_token = invite_token_value
+    and invite_type = 'link'
+    and (user_id is null or user_id = auth.uid())
+  returning *;
+end;
+$$;
+
 alter table public.albums enable row level security;
 alter table public.album_members enable row level security;
 alter table public.stickers enable row level security;
@@ -82,14 +226,7 @@ drop policy if exists "Owners delete albums" on public.albums;
 
 create policy "Members read albums"
 on public.albums for select
-using (
-  auth.uid() = owner_id
-  or exists (
-    select 1 from public.album_members am
-    where am.album_id = albums.id
-      and lower(am.email) = lower(coalesce(auth.jwt() ->> 'email', ''))
-  )
-);
+using (public.can_read_album(id));
 
 create policy "Authenticated create albums"
 on public.albums for insert
@@ -97,8 +234,8 @@ with check (auth.uid() is not null and owner_id = auth.uid());
 
 create policy "Owners update albums"
 on public.albums for update
-using (auth.uid() = owner_id)
-with check (auth.uid() = owner_id);
+using (public.can_edit_album(id))
+with check (public.can_edit_album(id));
 
 create policy "Owners delete albums"
 on public.albums for delete
@@ -109,14 +246,7 @@ drop policy if exists "Owners manage album_members" on public.album_members;
 
 create policy "Members read album_members"
 on public.album_members for select
-using (
-  lower(email) = lower(coalesce(auth.jwt() ->> 'email', ''))
-  or exists (
-    select 1 from public.albums a
-    where a.id = album_members.album_id
-      and a.owner_id = auth.uid()
-  )
-);
+using (public.can_read_album(album_id));
 
 create policy "Owners manage album_members"
 on public.album_members for all
@@ -146,71 +276,16 @@ drop policy if exists "Owners delete stickers" on public.stickers;
 
 create policy "Members read stickers"
 on public.stickers for select
-using (
-  exists (
-    select 1 from public.albums a
-    where a.id = stickers.album_id
-      and (
-        a.owner_id = auth.uid()
-        or exists (
-          select 1 from public.album_members am
-          where am.album_id = a.id
-            and lower(am.email) = lower(coalesce(auth.jwt() ->> 'email', ''))
-        )
-      )
-  )
-);
+using (public.can_read_album(album_id));
 
 create policy "Editors insert stickers"
 on public.stickers for insert
-with check (
-  exists (
-    select 1 from public.albums a
-    where a.id = stickers.album_id
-      and (
-        a.owner_id = auth.uid()
-        or exists (
-          select 1 from public.album_members am
-          where am.album_id = a.id
-            and lower(am.email) = lower(coalesce(auth.jwt() ->> 'email', ''))
-            and am.role in ('owner', 'editor')
-        )
-      )
-  )
-);
+with check (public.can_edit_album(album_id));
 
 create policy "Editors update stickers"
 on public.stickers for update
-using (
-  exists (
-    select 1 from public.albums a
-    where a.id = stickers.album_id
-      and (
-        a.owner_id = auth.uid()
-        or exists (
-          select 1 from public.album_members am
-          where am.album_id = a.id
-            and lower(am.email) = lower(coalesce(auth.jwt() ->> 'email', ''))
-            and am.role in ('owner', 'editor')
-        )
-      )
-  )
-)
-with check (
-  exists (
-    select 1 from public.albums a
-    where a.id = stickers.album_id
-      and (
-        a.owner_id = auth.uid()
-        or exists (
-          select 1 from public.album_members am
-          where am.album_id = a.id
-            and lower(am.email) = lower(coalesce(auth.jwt() ->> 'email', ''))
-            and am.role in ('owner', 'editor')
-        )
-      )
-  )
-);
+using (public.can_edit_album(album_id))
+with check (public.can_edit_album(album_id));
 
 create policy "Owners delete stickers"
 on public.stickers for delete

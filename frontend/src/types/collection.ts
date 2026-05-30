@@ -13,10 +13,17 @@ export type Album = {
 export type AlbumMember = {
   id: string;
   album_id: string;
-  email: string;
+  user_id: string | null;
+  email: string | null;
+  invite_type: 'email' | 'username' | 'phone' | 'link';
+  invite_value: string | null;
+  invite_token: string | null;
+  accepted_at: string | null;
   role: 'owner' | 'editor' | 'viewer';
   created_at: string;
 };
+
+export type InviteType = AlbumMember['invite_type'];
 
 export type AuthSession = {
   access_token: string;
@@ -25,6 +32,12 @@ export type AuthSession = {
   user: {
     id: string;
     email?: string;
+    phone?: string;
+    user_metadata?: {
+      username?: string;
+      user_name?: string;
+      name?: string;
+    };
   };
 };
 
