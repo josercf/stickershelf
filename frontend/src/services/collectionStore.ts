@@ -1,9 +1,10 @@
-import { Album, AlbumInput, CatalogStickerInput, Sticker, StickerInput, StickerPatch } from '../types/collection';
+import { Album, AlbumInput, AlbumMember, AuthSession, CatalogStickerInput, Sticker, StickerInput, StickerPatch } from '../types/collection';
 
 const configuredSupabaseUrl = process.env.REACT_APP_SUPABASE_URL?.trim().replace(/\/+$/, '') || '';
 const supabaseAnonKey = process.env.REACT_APP_SUPABASE_ANON_KEY || '';
 const localAlbumsKey = 'stickershelf.albums';
 const localStickersKey = 'stickershelf.stickers';
+const sessionKey = 'stickershelf.supabaseSession';
 
 function getSupabaseRestUrl() {
   if (!configuredSupabaseUrl) return '';
@@ -12,6 +13,9 @@ function getSupabaseRestUrl() {
 }
 
 const supabaseRestUrl = getSupabaseRestUrl();
+const supabaseAuthUrl = configuredSupabaseUrl
+  ? `${configuredSupabaseUrl.replace(/\/rest\/v1$/, '')}/auth/v1`
+  : '';
 
 export const isSupabaseConfigured = Boolean(supabaseRestUrl && supabaseAnonKey);
 
@@ -21,6 +25,7 @@ const seedAlbums: Album[] = [
   {
     id: 'demo-world-cup',
     name: 'Copa do Mundo 2026',
+    owner_id: null,
     publisher: 'Panini',
     season: '2026',
     cover_url: '',
@@ -96,6 +101,21 @@ function writeLocal<T>(key: string, value: T): T {
   return value;
 }
 
+function readSession(): AuthSession | null {
+  const stored = window.localStorage.getItem(sessionKey);
+  if (!stored) return null;
+  return JSON.parse(stored) as AuthSession;
+}
+
+function writeSession(session: AuthSession | null) {
+  if (!session) {
+    window.localStorage.removeItem(sessionKey);
+    return null;
+  }
+  window.localStorage.setItem(sessionKey, JSON.stringify(session));
+  return session;
+}
+
 function hydrateSticker(sticker: Sticker): Sticker {
   return {
     ...sticker,
@@ -109,8 +129,9 @@ function hydrateSticker(sticker: Sticker): Sticker {
 async function supabaseRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
   const cleanPath = path.replace(/^\/+/, '');
   const headers = new Headers(init.headers);
+  const session = readSession();
   headers.set('apikey', supabaseAnonKey);
-  headers.set('Authorization', `Bearer ${supabaseAnonKey}`);
+  headers.set('Authorization', `Bearer ${session?.access_token || supabaseAnonKey}`);
   headers.set('Content-Type', 'application/json');
   if (!headers.has('Prefer')) {
     headers.set('Prefer', 'return=representation');
@@ -133,8 +154,30 @@ async function supabaseRequest<T>(path: string, init: RequestInit = {}): Promise
   return response.json() as Promise<T>;
 }
 
+async function supabaseAuthRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const cleanPath = path.replace(/^\/+/, '');
+  const headers = new Headers(init.headers);
+  const session = readSession();
+  headers.set('apikey', supabaseAnonKey);
+  headers.set('Authorization', `Bearer ${session?.access_token || supabaseAnonKey}`);
+  headers.set('Content-Type', 'application/json');
+
+  const response = await fetch(`${supabaseAuthUrl}/${cleanPath}`, {
+    ...init,
+    headers,
+  });
+
+  if (!response.ok) {
+    const detail = await response.text();
+    throw new Error(detail || `Supabase auth request failed for /auth/v1/${cleanPath} with ${response.status}`);
+  }
+
+  return response.json() as Promise<T>;
+}
+
 const cleanAlbumInput = (input: AlbumInput) => ({
   name: input.name.trim(),
+  owner_id: input.owner_id || null,
   publisher: input.publisher?.trim() || null,
   season: input.season?.trim() || null,
   cover_url: input.cover_url?.trim() || null,
@@ -151,9 +194,56 @@ const cleanStickerInput = (input: StickerInput | StickerPatch) => ({
 });
 
 export const collectionStore = {
+  getSession(): AuthSession | null {
+    return readSession();
+  },
+
+  async requestLogin(email: string): Promise<void> {
+    if (!isSupabaseConfigured) {
+      throw new Error('Configure o Supabase para usar login.');
+    }
+    await supabaseAuthRequest('otp', {
+      method: 'POST',
+      body: JSON.stringify({
+        email: email.trim().toLowerCase(),
+        create_user: true,
+      }),
+    });
+  },
+
+  async verifyLogin(email: string, token: string): Promise<AuthSession> {
+    const session = await supabaseAuthRequest<AuthSession>('verify', {
+      method: 'POST',
+      body: JSON.stringify({
+        email: email.trim().toLowerCase(),
+        token: token.trim(),
+        type: 'email',
+      }),
+    });
+    return writeSession(session) as AuthSession;
+  },
+
+  signOut(): void {
+    writeSession(null);
+  },
+
   async listAlbums(): Promise<Album[]> {
     if (isSupabaseConfigured) {
-      return supabaseRequest<Album[]>('albums?select=*&order=updated_at.desc');
+      const session = readSession();
+      if (!session) return [];
+      const userId = encodeURIComponent(session.user.id);
+      const ownAlbums = await supabaseRequest<Album[]>(`albums?owner_id=eq.${userId}&select=*&order=updated_at.desc`);
+      const memberships = await supabaseRequest<AlbumMember[]>(
+        `album_members?email=eq.${encodeURIComponent(session.user.email || '')}&select=album_id`
+      );
+      const invitedIds = memberships.map((member) => member.album_id).filter(Boolean);
+      if (!invitedIds.length) return ownAlbums;
+
+      const invitedAlbums = await supabaseRequest<Album[]>(
+        `albums?id=in.(${invitedIds.map(encodeURIComponent).join(',')})&select=*&order=updated_at.desc`
+      );
+      const byId = new Map([...ownAlbums, ...invitedAlbums].map((album) => [album.id, album]));
+      return Array.from(byId.values()).sort((a, b) => b.updated_at.localeCompare(a.updated_at));
     }
 
     return readLocal<Album[]>(localAlbumsKey, seedAlbums);
@@ -163,10 +253,17 @@ export const collectionStore = {
     const payload = cleanAlbumInput(input);
 
     if (isSupabaseConfigured) {
+      const session = readSession();
       const [album] = await supabaseRequest<Album[]>('albums', {
         method: 'POST',
-        body: JSON.stringify(payload),
+        body: JSON.stringify({
+          ...payload,
+          owner_id: session?.user.id || payload.owner_id,
+        }),
       });
+      if (session?.user.email) {
+        await this.inviteMember(album.id, session.user.email, 'owner');
+      }
       return album;
     }
 
@@ -179,6 +276,40 @@ export const collectionStore = {
     };
     writeLocal(localAlbumsKey, [album, ...albums]);
     return album;
+  },
+
+  async listMembers(albumId: string): Promise<AlbumMember[]> {
+    if (isSupabaseConfigured) {
+      return supabaseRequest<AlbumMember[]>(
+        `album_members?album_id=eq.${encodeURIComponent(albumId)}&select=*&order=created_at.asc`
+      );
+    }
+    return [];
+  },
+
+  async inviteMember(albumId: string, email: string, role: AlbumMember['role'] = 'editor'): Promise<AlbumMember> {
+    const payload = {
+      album_id: albumId,
+      email: email.trim().toLowerCase(),
+      role,
+    };
+
+    if (isSupabaseConfigured) {
+      const [member] = await supabaseRequest<AlbumMember[]>('album_members?on_conflict=album_id%2Cemail', {
+        method: 'POST',
+        headers: {
+          Prefer: 'resolution=merge-duplicates,return=representation',
+        },
+        body: JSON.stringify(payload),
+      });
+      return member;
+    }
+
+    return {
+      id: crypto.randomUUID(),
+      ...payload,
+      created_at: now(),
+    };
   },
 
   async listStickers(albumId: string): Promise<Sticker[]> {

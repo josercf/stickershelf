@@ -1,12 +1,31 @@
 export type Album = {
   id: string;
   name: string;
+  owner_id: string | null;
   publisher: string | null;
   season: string | null;
   cover_url: string | null;
   total_stickers: number;
   created_at: string;
   updated_at: string;
+};
+
+export type AlbumMember = {
+  id: string;
+  album_id: string;
+  email: string;
+  role: 'owner' | 'editor' | 'viewer';
+  created_at: string;
+};
+
+export type AuthSession = {
+  access_token: string;
+  refresh_token?: string;
+  expires_at?: number;
+  user: {
+    id: string;
+    email?: string;
+  };
 };
 
 export type Sticker = {
@@ -27,6 +46,7 @@ export type Sticker = {
 
 export type AlbumInput = {
   name: string;
+  owner_id?: string | null;
   publisher?: string;
   season?: string;
   cover_url?: string;

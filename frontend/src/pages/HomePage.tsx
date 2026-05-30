@@ -1,5 +1,5 @@
 import React, { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { Album, CatalogStickerInput, CollectionStats, Sticker, StickerPatch } from '../types/collection';
+import { Album, AlbumMember, AuthSession, CatalogStickerInput, CollectionStats, Sticker, StickerPatch } from '../types/collection';
 import { collectionStore, isSupabaseConfigured, normalizeStickerCode } from '../services/collectionStore';
 import { buildPaniniWorldCup2026Catalog, paniniWorldCup2026Album } from '../data/paniniWorldCup2026';
 
@@ -34,6 +34,11 @@ const emptyGeneratorForm = {
   count: 20,
   padding: 3,
   section: '',
+};
+
+const emptyLoginForm = {
+  email: '',
+  token: '',
 };
 
 function getStats(album: Album | undefined, stickers: Sticker[]): CollectionStats {
@@ -73,6 +78,11 @@ function HomePage() {
   const [catalogForm, setCatalogForm] = useState(emptyCatalogForm);
   const [generatorForm, setGeneratorForm] = useState(emptyGeneratorForm);
   const [manualCode, setManualCode] = useState('');
+  const [loginForm, setLoginForm] = useState(emptyLoginForm);
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [session, setSession] = useState<AuthSession | null>(() => collectionStore.getSession());
+  const [members, setMembers] = useState<AlbumMember[]>([]);
+  const [loginStep, setLoginStep] = useState<'email' | 'token'>('email');
   const [lastScan, setLastScan] = useState<Sticker | null>(null);
   const [filter, setFilter] = useState<StickerFilter>('all');
   const [query, setQuery] = useState('');
@@ -135,22 +145,22 @@ function HomePage() {
     });
   }, [filter, query, stickers]);
 
-  useEffect(() => {
-    async function loadAlbums() {
-      try {
-        setLoading(true);
-        const result = await collectionStore.listAlbums();
-        setAlbums(result);
-        setSelectedAlbumId((current) => current || result[0]?.id || '');
-      } catch (err) {
-        setError(err instanceof Error ? err.message : 'Nao foi possivel carregar os albuns.');
-      } finally {
-        setLoading(false);
-      }
+  async function loadAlbums() {
+    try {
+      setLoading(true);
+      const result = await collectionStore.listAlbums();
+      setAlbums(result);
+      setSelectedAlbumId((current) => current || result[0]?.id || '');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Nao foi possivel carregar os albuns.');
+    } finally {
+      setLoading(false);
     }
+  }
 
+  useEffect(() => {
     loadAlbums();
-  }, []);
+  }, [session?.access_token]);
 
   useEffect(() => {
     async function loadStickers() {
@@ -176,6 +186,23 @@ function HomePage() {
     loadStickers();
   }, [selectedAlbumId]);
 
+  useEffect(() => {
+    async function loadMembers() {
+      if (!selectedAlbumId || !isSupabaseConfigured || !session) {
+        setMembers([]);
+        return;
+      }
+
+      try {
+        setMembers(await collectionStore.listMembers(selectedAlbumId));
+      } catch {
+        setMembers([]);
+      }
+    }
+
+    loadMembers();
+  }, [selectedAlbumId, session]);
+
   useEffect(() => stopCamera, []);
 
   async function reloadStickers(albumId = selectedAlbumId) {
@@ -199,6 +226,62 @@ function HomePage() {
       setAlbumForm(emptyAlbumForm);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Nao foi possivel criar o album.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleRequestLogin(event: FormEvent) {
+    event.preventDefault();
+    try {
+      setSaving(true);
+      setError('');
+      await collectionStore.requestLogin(loginForm.email);
+      setLoginStep('token');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Nao foi possivel enviar o codigo de login.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleVerifyLogin(event: FormEvent) {
+    event.preventDefault();
+    try {
+      setSaving(true);
+      setError('');
+      const nextSession = await collectionStore.verifyLogin(loginForm.email, loginForm.token);
+      setSession(nextSession);
+      setLoginForm(emptyLoginForm);
+      setLoginStep('email');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Nao foi possivel confirmar o codigo.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function handleSignOut() {
+    collectionStore.signOut();
+    setSession(null);
+    setAlbums([]);
+    setSelectedAlbumId('');
+    setStickers([]);
+    setMembers([]);
+  }
+
+  async function handleInviteMember(event: FormEvent) {
+    event.preventDefault();
+    if (!selectedAlbumId || !inviteEmail.trim()) return;
+
+    try {
+      setSaving(true);
+      setError('');
+      await collectionStore.inviteMember(selectedAlbumId, inviteEmail, 'editor');
+      setInviteEmail('');
+      setMembers(await collectionStore.listMembers(selectedAlbumId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Nao foi possivel convidar colaborador.');
     } finally {
       setSaving(false);
     }
@@ -417,6 +500,39 @@ function HomePage() {
       <div className="mx-auto grid max-w-7xl gap-6 px-4 py-6 sm:px-6 lg:grid-cols-[320px_1fr] lg:px-8">
         <aside className="space-y-4">
           <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+            <h2 className="mb-3 text-base font-semibold">Identidade</h2>
+            {!isSupabaseConfigured ? (
+              <p className="text-sm text-zinc-500">Configure o Supabase para usar login e colaboracao.</p>
+            ) : session ? (
+              <div className="space-y-3">
+                <div className="rounded-md bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+                  {session.user.email || 'Usuario conectado'}
+                </div>
+                <button className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium hover:bg-zinc-50" onClick={handleSignOut} type="button">
+                  Sair
+                </button>
+              </div>
+            ) : loginStep === 'email' ? (
+              <form className="space-y-3" onSubmit={handleRequestLogin}>
+                <TextField label="E-mail" value={loginForm.email} onChange={(email) => setLoginForm({ ...loginForm, email })} />
+                <button className="w-full rounded-md bg-emerald-700 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-800" disabled={saving} type="submit">
+                  Enviar codigo
+                </button>
+              </form>
+            ) : (
+              <form className="space-y-3" onSubmit={handleVerifyLogin}>
+                <TextField label="Codigo recebido" value={loginForm.token} onChange={(token) => setLoginForm({ ...loginForm, token })} />
+                <button className="w-full rounded-md bg-emerald-700 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-800" disabled={saving} type="submit">
+                  Entrar
+                </button>
+                <button className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm font-medium hover:bg-zinc-50" onClick={() => setLoginStep('email')} type="button">
+                  Trocar e-mail
+                </button>
+              </form>
+            )}
+          </section>
+
+          <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-base font-semibold">Albuns</h2>
               <span className="text-sm text-zinc-500">{albums.length}</span>
@@ -480,6 +596,26 @@ function HomePage() {
               </button>
             </form>
           </section>
+
+          {selectedAlbum && session && (
+            <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+              <h2 className="mb-3 text-base font-semibold">Colaboradores</h2>
+              <form className="space-y-3" onSubmit={handleInviteMember}>
+                <TextField label="E-mail" value={inviteEmail} onChange={setInviteEmail} />
+                <button className="w-full rounded-md bg-zinc-950 px-3 py-2 text-sm font-medium text-white hover:bg-zinc-800" disabled={saving} type="submit">
+                  Convidar editor
+                </button>
+              </form>
+              <div className="mt-4 space-y-2">
+                {members.map((member) => (
+                  <div className="rounded-md bg-zinc-50 px-3 py-2 text-sm" key={member.id}>
+                    <p className="font-medium text-zinc-800">{member.email}</p>
+                    <p className="text-xs uppercase text-zinc-500">{member.role}</p>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
         </aside>
 
         <section className="space-y-4">
