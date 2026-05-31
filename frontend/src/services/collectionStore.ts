@@ -88,6 +88,14 @@ export function normalizeStickerCode(value: string) {
   return value.trim().replace(/\s+/g, ' ').toUpperCase();
 }
 
+// Ordenação natural dos códigos: trata os dígitos como números, então
+// "FWC 2" vem antes de "FWC 10" (e não 1, 10, 11..., 2, 20 como no sort de string).
+// O `order=code.asc` do PostgREST é alfabético, por isso reordenamos no cliente.
+const codeCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+export function compareStickerCode(a: string, b: string) {
+  return codeCollator.compare(a, b);
+}
+
 function readLocal<T>(key: string, fallback: T): T {
   const stored = window.localStorage.getItem(key);
   if (!stored) {
@@ -623,14 +631,14 @@ export const collectionStore = {
       const result = await supabaseRequest<Sticker[]>(
         `stickers?album_id=eq.${encodeURIComponent(albumId)}&select=*&order=code.asc`
       );
-      return result.map(hydrateSticker);
+      return result.map(hydrateSticker).sort((a, b) => compareStickerCode(a.code, b.code));
     }
 
     const stickers = readLocal<Sticker[]>(localStickersKey, seedStickers);
     return stickers
       .filter((sticker) => sticker.album_id === albumId)
       .map(hydrateSticker)
-      .sort((a, b) => a.code.localeCompare(b.code));
+      .sort((a, b) => compareStickerCode(a.code, b.code));
   },
 
   async createSticker(input: StickerInput): Promise<Sticker> {

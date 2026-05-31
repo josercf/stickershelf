@@ -276,3 +276,17 @@ describe('collectionStore — rename, label e compartilhamento', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
+
+describe('collectionStore — ordenação natural de códigos', () => {
+  it('ordena os números dentro do mesmo prefixo numericamente', () => {
+    const { compareStickerCode } = loadStore();
+    const sorted = ['FWC 10', 'FWC 2', 'FWC 1', 'FWC 19', 'FWC 20', 'FWC 3'].sort(compareStickerCode);
+    expect(sorted).toEqual(['FWC 1', 'FWC 2', 'FWC 3', 'FWC 10', 'FWC 19', 'FWC 20']);
+  });
+
+  it('mantém os prefixos agrupados alfabeticamente', () => {
+    const { compareStickerCode } = loadStore();
+    const sorted = ['FWC 1', 'BRA 20', 'BRA 3', 'BRA 1', 'PANINI 1'].sort(compareStickerCode);
+    expect(sorted).toEqual(['BRA 1', 'BRA 3', 'BRA 20', 'FWC 1', 'PANINI 1']);
+  });
+});

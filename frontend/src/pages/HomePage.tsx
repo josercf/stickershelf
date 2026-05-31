@@ -3,7 +3,7 @@ import { Album, AlbumMember, AuthSession, CatalogStickerInput, CollectionStats, 
 import { collectionStore, isSupabaseConfigured, normalizeStickerCode } from '../services/collectionStore';
 import { filterStickers, groupBySection, sectionSummaries } from '../services/catalogFilters';
 import { buildPaniniWorldCup2026Catalog, paniniWorldCup2026Album } from '../data/paniniWorldCup2026';
-import { getCountryBySection } from '../data/countries';
+import { flagEmoji, getCountryBySection } from '../data/countries';
 import jsQR from 'jsqr';
 
 declare global {
@@ -557,23 +557,17 @@ function CatalogToolbar({ filter, query, sections, sectionFilter, setFilter, set
    COUNTRY STRIP
    ========================================================================== */
 
-function FlagCSS({ colors, style: flagStyle = 'horizontal', size = 32 }: {
-  colors: [string, string, string];
-  style?: 'horizontal' | 'vertical';
-  size?: number;
-}) {
-  const gradient = flagStyle === 'horizontal'
-    ? `linear-gradient(to bottom, ${colors[0]} 33.3%, ${colors[1]} 33.3%, ${colors[1]} 66.6%, ${colors[2]} 66.6%)`
-    : `linear-gradient(to right, ${colors[0]} 33.3%, ${colors[1]} 33.3%, ${colors[1]} 66.6%, ${colors[2]} 66.6%)`;
+function FlagEmoji({ code, size = 28 }: { code: string; size?: number }) {
+  const emoji = flagEmoji(code);
+  if (!emoji) return null;
   return (
-    <div style={{
-      width: size * 1.5,
-      height: size,
-      borderRadius: 3,
-      background: gradient,
-      border: '1px solid rgba(0,0,0,0.15)',
-      flexShrink: 0,
-    }} />
+    <span
+      role="img"
+      aria-label="Bandeira"
+      style={{ fontSize: size, lineHeight: 1, flexShrink: 0, fontFamily: '"Noto Color Emoji", "Apple Color Emoji", "Segoe UI Emoji", sans-serif' }}
+    >
+      {emoji}
+    </span>
   );
 }
 
@@ -594,7 +588,7 @@ function CountryStrip({ section }: { section: string }) {
     }}>
       {/* Header: flag + country name + map button */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <FlagCSS colors={country.flag.colors} style={country.flag.style} size={28} />
+        <FlagEmoji code={country.code} size={30} />
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{
             fontFamily: 'var(--font-display)',
