@@ -338,18 +338,22 @@ export const collectionStore = {
 
     if (isSupabaseConfigured) {
       const session = readSession();
-      const userId = sessionUserId(session);
-      if (!userId) {
+      if (!session?.access_token) {
         throw new Error('Sessão inválida. Faça login novamente antes de criar um álbum.');
       }
-      const [album] = await supabaseRequest<Album[]>('albums', {
+      // Use RPC function (SECURITY DEFINER) to bypass PostgREST RLS quirk
+      // on direct INSERT WITH CHECK. The function sets owner_id = auth.uid() internally.
+      const album = await supabaseRequest<Album>('rpc/create_album_for_current_user', {
         method: 'POST',
         body: JSON.stringify({
-          ...payload,
-          owner_id: userId,
+          p_name: payload.name,
+          p_publisher: payload.publisher ?? null,
+          p_season: payload.season ?? null,
+          p_cover_url: payload.cover_url ?? null,
+          p_total_stickers: payload.total_stickers,
         }),
       });
-      if (session?.user.email) {
+      if (session?.user?.email) {
         await this.inviteMember(album.id, session.user.email, 'owner');
       }
       return album;
