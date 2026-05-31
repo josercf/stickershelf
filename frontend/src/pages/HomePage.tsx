@@ -510,11 +510,16 @@ function SectionCarousel({ isWide, name, items, onPatch }: {
   // Layout 100% inline (decidido por isWide), nunca por classe CSS, para o
   // carrossel mobile ser imune a qualquer regra de cascata (grid global etc.).
   const { container: containerStyle, card: cardStyle } = carouselLayout(isWide);
+  // Bandeira do país da seção (ex.: "Brazil" → 🇧🇷), quando a seção mapeia para um país.
+  const sectionFlag = flagEmoji(getCountryBySection(name)?.code ?? '');
 
   return (
     <section style={{ marginBottom: 6 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '0 16px 8px' }}>
-        <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 15, color: 'var(--on-surface)' }}>{name}</div>
+        <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 15, color: 'var(--on-surface)', display: 'flex', alignItems: 'center', gap: 6 }}>
+          {sectionFlag && <span aria-hidden style={{ fontSize: 18, lineHeight: 1 }}>{sectionFlag}</span>}
+          {name}
+        </div>
         <span className="label-caps" style={{ fontSize: 10, color: 'var(--on-surface-variant)' }}>{owned}/{items.length}</span>
       </div>
       <div className="cat-scroll" style={containerStyle}>
@@ -611,7 +616,8 @@ function CatalogToolbar({ filter, query, sections, sectionFilter, setFilter, set
 
   return (
     // Barra fixa abaixo do app bar (56px): mantém busca, status e seção sempre visíveis.
-    <div style={{ position: 'sticky', top: 56, zIndex: 30, background: 'var(--surface-container-lowest)', border: '2px solid var(--outline-variant)', borderRadius: 'var(--radius-lg)', padding: 12, boxShadow: 'var(--shadow-card)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+    // No mobile fica compacta (classe catalog-toolbar) para cobrir o mínimo do card ao rolar.
+    <div className="catalog-toolbar" style={{ position: 'sticky', top: 56, zIndex: 30, background: 'var(--surface-container-lowest)', border: '2px solid var(--outline-variant)', borderRadius: 'var(--radius-lg)', boxShadow: 'var(--shadow-card)', display: 'flex', flexDirection: 'column' }}>
       <div style={{ position: 'relative' }}>
         <MatIcon name="search" size={18} color="var(--on-surface-variant)" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)' }} />
         <input
@@ -627,7 +633,7 @@ function CatalogToolbar({ filter, query, sections, sectionFilter, setFilter, set
 
       {/* Filtro por status */}
       <div>
-        <span className="label-caps" style={{ color: 'var(--on-surface-variant)', fontSize: 9, display: 'block', marginBottom: 6 }}>Status</span>
+        <span className="label-caps hidden sm:block" style={{ color: 'var(--on-surface-variant)', fontSize: 9, marginBottom: 6 }}>Status</span>
         <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4 }}>
           {statusOptions.map(({ v, label }) => {
             const active = filter === v;
@@ -643,7 +649,7 @@ function CatalogToolbar({ filter, query, sections, sectionFilter, setFilter, set
       {/* Seletor de seção */}
       {sections.length > 1 && (
         <div>
-          <span className="label-caps" style={{ color: 'var(--on-surface-variant)', fontSize: 9, display: 'block', marginBottom: 6 }}>Seção</span>
+          <span className="label-caps hidden sm:block" style={{ color: 'var(--on-surface-variant)', fontSize: 9, marginBottom: 6 }}>Seção</span>
 
           {/* Mobile: dropdown compacto (poupa espaço vertical) */}
           <select
@@ -1544,6 +1550,10 @@ function HomePage() {
   }
 
   /* ── NAV TABS ─────────────────────────────────────────────────── */
+  // Aba "Leitor" (scanner de código de barras) oculta por enquanto. O código
+  // do scanner permanece intacto; basta voltar este flag para true para reexibir.
+  const SHOW_SCANNER = false;
+
   const NAV_TABS = [
     { id: 'home' as MobileTab,    icon: 'home',            label: 'Início' },
     { id: 'scan' as MobileTab,    icon: 'qr_code_scanner', label: 'Leitor' },
@@ -1551,15 +1561,15 @@ function HomePage() {
     { id: 'market' as MobileTab,  icon: 'storefront',      label: 'Mercado' },
     { id: 'catalog' as MobileTab, icon: 'list_alt',        label: 'Catálogo' },
     { id: 'trades' as MobileTab,  icon: 'sync_alt',        label: 'Trocas' },
-  ];
+  ].filter((tab) => SHOW_SCANNER || tab.id !== 'scan');
 
   const DESKTOP_VIEW_TABS: { id: ViewMode; icon: string; label: string }[] = [
-    { id: 'scan',    icon: 'qr_code_scanner', label: 'Leitor' },
-    { id: 'teams',   icon: 'groups',          label: 'Times' },
-    { id: 'market',  icon: 'storefront',      label: 'Mercado' },
-    { id: 'catalog', icon: 'list_alt',        label: 'Catálogo' },
-    { id: 'trades',  icon: 'sync_alt',        label: 'Trocas' },
-  ];
+    { id: 'scan' as ViewMode,    icon: 'qr_code_scanner', label: 'Leitor' },
+    { id: 'teams' as ViewMode,   icon: 'groups',          label: 'Times' },
+    { id: 'market' as ViewMode,  icon: 'storefront',      label: 'Mercado' },
+    { id: 'catalog' as ViewMode, icon: 'list_alt',        label: 'Catálogo' },
+    { id: 'trades' as ViewMode,  icon: 'sync_alt',        label: 'Trocas' },
+  ].filter((tab) => SHOW_SCANNER || tab.id !== 'scan');
 
   /* ── RENDER ───────────────────────────────────────────────────── */
   if (!authReady) {

@@ -43,4 +43,22 @@ describe('catálogo de países', () => {
     const iso = countries.map((c) => c.code).filter((code) => /^[A-Z]{2}$/.test(code));
     expect(new Set(iso).size).toBe(iso.length);
   });
+
+  // Composição usada pelo SectionCarousel para exibir a bandeira ao lado do
+  // nome da seção: flagEmoji(getCountryBySection(name)?.code ?? '').
+  describe('bandeira da seção do carrossel', () => {
+    const sectionFlag = (name: string) => flagEmoji(getCountryBySection(name)?.code ?? '');
+
+    it('gera a bandeira correta para seções de país conhecidas', () => {
+      expect(sectionFlag('Brazil')).toBe(String.fromCodePoint(0x1f1e7, 0x1f1f7));
+      expect(sectionFlag('Argentina')).toBe(String.fromCodePoint(0x1f1e6, 0x1f1f7));
+      expect(sectionFlag('England')).toBe('\u{1F3F4}\u{E0067}\u{E0062}\u{E0065}\u{E006E}\u{E0067}\u{E007F}');
+    });
+
+    it('devolve string vazia para seções sem país mapeado', () => {
+      expect(sectionFlag('Coca-Cola')).toBe('');
+      expect(sectionFlag('Legends')).toBe('');
+      expect(sectionFlag('')).toBe('');
+    });
+  });
 });

@@ -221,3 +221,18 @@ body {
 .cat-scroll::-webkit-scrollbar {
   display: none;
 }
+
+/* ============================================================================
+   CATALOG TOOLBAR — barra sticky de filtros. Compacta no mobile para cobrir o
+   mínimo do card ao rolar; mais espaçada a partir de 640px (sm).
+   ========================================================================== */
+.catalog-toolbar {
+  padding: 8px;
+  gap: 6px;
+}
+@media (min-width: 640px) {
+  .catalog-toolbar {
+    padding: 12px;
+    gap: 10px;
+  }
+}
