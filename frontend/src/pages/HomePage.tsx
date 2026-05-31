@@ -844,6 +844,16 @@ function HomePage() {
 
   useEffect(() => { loadAlbums(); }, [session?.access_token]);
 
+  // Sessão expirada de forma irrecuperável (refresh falhou): limpa o estado
+  // e força re-login para evitar telas presas com JWT expirado (PGRST303).
+  useEffect(() => {
+    return collectionStore.onSessionExpired(() => {
+      collectionStore.signOut();
+      setSession(null); setAlbums([]); setSelectedAlbumId(''); setStickers([]); setMembers([]);
+      setError('Sua sessão expirou. Faça login novamente.');
+    });
+  }, []);
+
   useEffect(() => {
     async function loadStickers() {
       if (!selectedAlbumId) { setStickers([]); return; }

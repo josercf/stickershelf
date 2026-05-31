@@ -116,6 +116,127 @@ function writeSession(session: AuthSession | null) {
   return session;
 }
 
+// --- Renovação de token (refresh) -----------------------------------------
+// O auth é artesanal (sem supabase-js): o access_token é persistido no
+// localStorage e enviado manualmente. JWTs do Supabase expiram (~1h), então
+// precisamos renovar via refresh_token, senão o PostgREST devolve
+// PGRST303 "JWT expired" ao reusar o token velho.
+
+const EXPIRY_SKEW_SECONDS = 60;
+
+export class SessionExpiredError extends Error {
+  constructor(message = 'Sua sessão expirou. Faça login novamente.') {
+    super(message);
+    this.name = 'SessionExpiredError';
+  }
+}
+
+type SessionExpiredListener = () => void;
+const sessionExpiredListeners = new Set<SessionExpiredListener>();
+
+function notifySessionExpired() {
+  sessionExpiredListeners.forEach((listener) => {
+    try {
+      listener();
+    } catch {
+      /* listeners não devem interromper o fluxo */
+    }
+  });
+}
+
+function clearSessionAndNotify() {
+  writeSession(null);
+  notifySessionExpired();
+}
+
+// Normaliza a sessão garantindo expires_at (unix seconds) a partir de
+// expires_in quando o endpoint só devolver a duração relativa.
+function withExpiry(session: AuthSession & { expires_in?: number }): AuthSession {
+  if (session.expires_at || !session.expires_in) return session;
+  const { expires_in, ...rest } = session;
+  return { ...rest, expires_at: Math.floor(Date.now() / 1000) + Number(expires_in) };
+}
+
+function isExpired(session: AuthSession | null, skewSeconds = EXPIRY_SKEW_SECONDS): boolean {
+  // Sem expires_at conhecido: assume válido e deixa o caminho reativo (PGRST303) tratar.
+  if (!session?.expires_at) return false;
+  return session.expires_at <= Math.floor(Date.now() / 1000) + skewSeconds;
+}
+
+function isAuthError(status: number, detail: string): boolean {
+  if (status === 401) return true;
+  const lower = detail.toLowerCase();
+  return lower.includes('pgrst303') || lower.includes('jwt expired');
+}
+
+// Dedup: várias requisições paralelas compartilham um único refresh em voo.
+let refreshInFlight: Promise<AuthSession | null> | null = null;
+
+async function performRefresh(current: AuthSession): Promise<AuthSession | null> {
+  let response: Response;
+  try {
+    response = await fetch(`${supabaseAuthUrl}/token?grant_type=refresh_token`, {
+      method: 'POST',
+      headers: {
+        apikey: supabaseAnonKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ refresh_token: current.refresh_token }),
+    });
+  } catch (err) {
+    // Erro de rede é transitório: não derruba a sessão, propaga para o caller.
+    throw err;
+  }
+
+  if (!response.ok) {
+    // refresh_token inválido/expirado → sessão irrecuperável, força re-login.
+    clearSessionAndNotify();
+    return null;
+  }
+
+  const data = (await response.json()) as AuthSession & { expires_in?: number };
+  if (!data.access_token) {
+    clearSessionAndNotify();
+    return null;
+  }
+
+  return writeSession(
+    withExpiry({
+      access_token: data.access_token,
+      refresh_token: data.refresh_token ?? current.refresh_token,
+      expires_at: data.expires_at,
+      expires_in: data.expires_in,
+      user: data.user ?? current.user,
+    })
+  );
+}
+
+async function refreshSession(): Promise<AuthSession | null> {
+  const current = readSession();
+  if (!current?.refresh_token) {
+    clearSessionAndNotify();
+    return null;
+  }
+  if (!refreshInFlight) {
+    refreshInFlight = performRefresh(current).finally(() => {
+      refreshInFlight = null;
+    });
+  }
+  return refreshInFlight;
+}
+
+// Garante um access_token válido antes da requisição.
+// Retorna null para anônimo; lança SessionExpiredError se havia sessão mas
+// o refresh falhou de forma definitiva (refresh_token inválido).
+async function ensureFreshSession(): Promise<AuthSession | null> {
+  const session = readSession();
+  if (!session) return null;
+  if (!isExpired(session)) return session;
+  const refreshed = await refreshSession();
+  if (!refreshed) throw new SessionExpiredError();
+  return refreshed;
+}
+
 async function getAuthUser(accessToken: string): Promise<AuthSession['user']> {
   const response = await fetch(`${supabaseAuthUrl}/user`, {
     headers: {
@@ -163,10 +284,11 @@ function hydrateSticker(sticker: Sticker): Sticker {
   };
 }
 
-async function supabaseRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+async function supabaseRequest<T>(path: string, init: RequestInit = {}, retryOnAuthError = true): Promise<T> {
   const cleanPath = path.replace(/^\/+/, '');
   const headers = new Headers(init.headers);
-  const session = readSession();
+  // Refresh proativo: renova o token se estiver expirado/perto de expirar.
+  const session = await ensureFreshSession();
   headers.set('apikey', supabaseAnonKey);
   headers.set('Authorization', `Bearer ${session?.access_token || supabaseAnonKey}`);
   headers.set('Content-Type', 'application/json');
@@ -181,6 +303,12 @@ async function supabaseRequest<T>(path: string, init: RequestInit = {}): Promise
 
   if (!response.ok) {
     const detail = await response.text();
+    // Refresh reativo: token recusado (PGRST303/401) → renova uma vez e repete.
+    if (retryOnAuthError && session && isAuthError(response.status, detail)) {
+      const refreshed = await refreshSession();
+      if (!refreshed) throw new SessionExpiredError();
+      return supabaseRequest<T>(path, init, false);
+    }
     throw new Error(detail || `Supabase request failed for /rest/v1/${cleanPath} with ${response.status}`);
   }
 
@@ -262,21 +390,21 @@ export const collectionStore = {
     if (!isSupabaseConfigured) {
       throw new Error('Configure o Supabase para usar login.');
     }
-    const session = await supabaseAuthRequest<AuthSession>('token?grant_type=password', {
+    const session = await supabaseAuthRequest<AuthSession & { expires_in?: number }>('token?grant_type=password', {
       method: 'POST',
       body: JSON.stringify({
         email: email.trim().toLowerCase(),
         password,
       }),
     });
-    return writeSession(session) as AuthSession;
+    return writeSession(withExpiry(session)) as AuthSession;
   },
 
   async signUp(email: string, password: string): Promise<AuthSession | 'confirmation-sent'> {
     if (!isSupabaseConfigured) {
       throw new Error('Configure o Supabase para usar login.');
     }
-    const result = await supabaseAuthRequest<AuthSession & { id?: string }>('signup', {
+    const result = await supabaseAuthRequest<AuthSession & { id?: string; expires_in?: number }>('signup', {
       method: 'POST',
       body: JSON.stringify({
         email: email.trim().toLowerCase(),
@@ -284,13 +412,26 @@ export const collectionStore = {
       }),
     });
     if (result.access_token) {
-      return writeSession(result) as AuthSession;
+      return writeSession(withExpiry(result)) as AuthSession;
     }
     return 'confirmation-sent';
   },
 
   signOut(): void {
     writeSession(null);
+  },
+
+  // Notifica a UI quando a sessão expira de forma irrecuperável (refresh
+  // falhou): permite limpar o estado e redirecionar para o login.
+  onSessionExpired(listener: () => void): () => void {
+    sessionExpiredListeners.add(listener);
+    return () => {
+      sessionExpiredListeners.delete(listener);
+    };
+  },
+
+  async refreshSession(): Promise<AuthSession | null> {
+    return refreshSession();
   },
 
   async listAlbums(): Promise<Album[]> {
