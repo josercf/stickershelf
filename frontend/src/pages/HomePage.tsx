@@ -340,64 +340,105 @@ function TeamStickerCard({ onPatch, sticker }: { onPatch: (patch: StickerPatch) 
 
 function StickerRow({ onPatch, sticker }: { onPatch: (patch: StickerPatch) => void; sticker: Sticker }) {
   const isOwned = sticker.quantity > 0;
+  const canStick = isOwned || sticker.is_stuck;
+
+  // Ações compartilhadas entre o card mobile e a linha da tabela (desktop).
+  const dec = () => onPatch({ quantity: Math.max(sticker.quantity - 1, 0), owned: sticker.quantity - 1 > 0, is_stuck: sticker.quantity - 1 > 0 ? sticker.is_stuck : false });
+  const inc = () => onPatch({ quantity: sticker.quantity + 1, owned: true, wishlisted: false });
+  const toggleStuck = () => onPatch({ is_stuck: !sticker.is_stuck, quantity: sticker.quantity || 1, owned: true });
+  const toggleWish = () => onPatch({ wishlisted: !sticker.wishlisted });
+
+  const stepperButton: React.CSSProperties = { width: 44, height: 44, borderRadius: 'var(--radius)', border: '2px solid var(--outline-variant)', background: 'var(--surface-container-lowest)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-display)', fontSize: 20, color: 'var(--on-surface)', flexShrink: 0 };
+  const statusPill = (
+    <span style={{ display: 'inline-block', borderRadius: 'var(--radius-full)', padding: '5px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', background: isOwned ? 'var(--primary-container)' : 'var(--surface-container)', color: isOwned ? 'var(--on-primary-container)' : 'var(--on-surface-variant)' }}>
+      {isOwned ? 'Tenho' : 'Falta'}
+    </span>
+  );
 
   return (
-    <article style={{ display: 'grid', gap: 12, padding: '12px 16px', borderBottom: '1px solid var(--surface-container)' }} className="grid-cols-1 sm:grid-cols-[100px_1fr_120px_150px_120px_80px]">
-      {/* Code */}
-      <div>
-        <span className="label-caps" style={{ fontSize: 8, color: 'var(--on-surface-variant)', display: 'block' }} data-mobile-only>Código</span>
-        <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 600, color: 'var(--on-surface)' }}>{sticker.code}</span>
-      </div>
-      {/* Title + thumbnail */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-        <div style={{ width: 44, flexShrink: 0 }}>
-          <StickerVisual compact sticker={sticker} />
+    <>
+      {/* ── MOBILE CARD (< sm) ── */}
+      {/* display controlado pelas classes Tailwind (flex / sm:hidden), por isso não há display inline */}
+      <article className="flex flex-col sm:hidden" style={{ gap: 10, padding: 12, borderBottom: '1px solid var(--surface-container)' }}>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+          <div style={{ width: 52, flexShrink: 0 }}>
+            <StickerVisual compact sticker={sticker} />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600, color: 'var(--on-surface-variant)' }}>{sticker.code}</span>
+            <div style={{ fontFamily: 'var(--font-body)', fontWeight: 600, fontSize: 15, color: 'var(--on-surface)', lineHeight: 1.25 }}>{sticker.title}</div>
+            <div style={{ fontSize: 13, color: 'var(--on-surface-variant)' }}>{sticker.section || 'Sem seção'}</div>
+          </div>
+          <button aria-label="Desejada" onClick={toggleWish}
+            style={{ width: 44, height: 44, flexShrink: 0, borderRadius: 'var(--radius)', border: sticker.wishlisted ? '2px solid var(--tertiary-container)' : '2px solid var(--outline-variant)', background: sticker.wishlisted ? 'var(--tertiary-fixed-dim)' : 'var(--surface-container-lowest)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <MatIcon name="star" size={20} fill={sticker.wishlisted} color={sticker.wishlisted ? 'var(--tertiary)' : 'var(--outline-variant)'} />
+          </button>
         </div>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontFamily: 'var(--font-body)', fontWeight: 600, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--on-surface)' }}>{sticker.title}</div>
-          <div style={{ fontSize: 13, color: 'var(--on-surface-variant)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sticker.section || 'Sem seção'}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {statusPill}
+          {sticker.quantity > 1 && (
+            <span style={{ borderRadius: 'var(--radius-full)', background: 'var(--secondary-container)', padding: '3px 8px', fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 600, color: 'var(--on-secondary-container)' }}>troca</span>
+          )}
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+            <button aria-label="Diminuir" style={stepperButton} onClick={dec}>−</button>
+            <span style={{ minWidth: 28, textAlign: 'center', fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 16 }}>{sticker.quantity}</span>
+            <button aria-label="Aumentar" style={stepperButton} onClick={inc}>+</button>
+          </div>
         </div>
-      </div>
-      {/* Status chip */}
-      <div>
-        <span style={{ display: 'inline-block', borderRadius: 'var(--radius-full)', padding: '4px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', background: isOwned ? 'var(--primary-container)' : 'var(--surface-container)', color: isOwned ? 'var(--on-primary-container)' : 'var(--on-surface-variant)' }}>
-          {isOwned ? 'Tenho' : 'Falta'}
-        </span>
-      </div>
-      {/* Quantity controls */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <button aria-label="Diminuir" style={{ width: 32, height: 32, borderRadius: 'var(--radius)', border: '2px solid var(--outline-variant)', background: 'var(--surface-container-lowest)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-display)', fontSize: 16, color: 'var(--on-surface)' }}
-          onClick={() => onPatch({ quantity: Math.max(sticker.quantity - 1, 0), owned: sticker.quantity - 1 > 0, is_stuck: sticker.quantity - 1 > 0 ? sticker.is_stuck : false })}>
-          −
-        </button>
-        <span style={{ width: 28, textAlign: 'center', fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 14 }}>{sticker.quantity}</span>
-        <button aria-label="Aumentar" style={{ width: 32, height: 32, borderRadius: 'var(--radius)', border: '2px solid var(--outline-variant)', background: 'var(--surface-container-lowest)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-display)', fontSize: 16, color: 'var(--on-surface)' }}
-          onClick={() => onPatch({ quantity: sticker.quantity + 1, owned: true, wishlisted: false })}>
-          +
-        </button>
-        {sticker.quantity > 1 && (
-          <span style={{ borderRadius: 'var(--radius-full)', background: 'var(--secondary-container)', padding: '2px 8px', fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 600, color: 'var(--on-secondary-container)' }}>troca</span>
-        )}
-      </div>
-      {/* Stick button */}
-      <div>
         <button
-          style={{ borderRadius: 'var(--radius)', border: sticker.is_stuck ? '2px solid var(--primary)' : '2px solid var(--outline-variant)', background: sticker.is_stuck ? 'var(--primary)' : 'var(--surface-container-lowest)', padding: '7px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', cursor: 'pointer', color: sticker.is_stuck ? 'var(--on-primary)' : 'var(--on-surface)', transition: 'all 0.15s' }}
-          disabled={!isOwned && !sticker.is_stuck}
-          onClick={() => onPatch({ is_stuck: !sticker.is_stuck, quantity: sticker.quantity || 1, owned: true })}>
-          {sticker.is_stuck ? 'Colada' : 'Colar'}
+          style={{ width: '100%', minHeight: 44, borderRadius: 'var(--radius)', border: sticker.is_stuck ? '2px solid var(--primary)' : '2px solid var(--outline-variant)', background: sticker.is_stuck ? 'var(--primary)' : 'var(--surface-container-lowest)', padding: '10px 12px', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', cursor: canStick ? 'pointer' : 'not-allowed', color: sticker.is_stuck ? 'var(--on-primary)' : 'var(--on-surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, opacity: canStick ? 1 : 0.5 }}
+          disabled={!canStick}
+          onClick={toggleStuck}>
+          <MatIcon name={sticker.is_stuck ? 'task_alt' : 'add_circle'} size={16} color={sticker.is_stuck ? 'var(--on-primary)' : 'var(--on-surface)'} />
+          {sticker.is_stuck ? 'Colada no álbum' : 'Marcar como colada'}
         </button>
-      </div>
-      {/* Wishlist */}
-      <div>
-        <button
-          aria-label="Desejada"
-          style={{ width: 36, height: 36, borderRadius: 'var(--radius)', border: sticker.wishlisted ? '2px solid var(--tertiary-container)' : '2px solid var(--outline-variant)', background: sticker.wishlisted ? 'var(--tertiary-fixed-dim)' : 'var(--surface-container-lowest)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s' }}
-          onClick={() => onPatch({ wishlisted: !sticker.wishlisted })}>
-          <MatIcon name="star" size={18} fill={sticker.wishlisted} color={sticker.wishlisted ? 'var(--tertiary)' : 'var(--outline-variant)'} />
-        </button>
-      </div>
-    </article>
+      </article>
+
+      {/* ── DESKTOP TABLE ROW (sm+) ── */}
+      <article className="hidden sm:grid" style={{ gridTemplateColumns: '100px 1fr 120px 150px 120px 80px', gap: 12, padding: '12px 16px', borderBottom: '1px solid var(--surface-container)' }}>
+        <div>
+          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 600, color: 'var(--on-surface)' }}>{sticker.code}</span>
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+          <div style={{ width: 44, flexShrink: 0 }}>
+            <StickerVisual compact sticker={sticker} />
+          </div>
+          <div style={{ minWidth: 0 }}>
+            <div style={{ fontFamily: 'var(--font-body)', fontWeight: 600, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--on-surface)' }}>{sticker.title}</div>
+            <div style={{ fontSize: 13, color: 'var(--on-surface-variant)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sticker.section || 'Sem seção'}</div>
+          </div>
+        </div>
+        <div>{statusPill}</div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <button aria-label="Diminuir" style={{ width: 32, height: 32, borderRadius: 'var(--radius)', border: '2px solid var(--outline-variant)', background: 'var(--surface-container-lowest)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-display)', fontSize: 16, color: 'var(--on-surface)' }} onClick={dec}>
+            −
+          </button>
+          <span style={{ width: 28, textAlign: 'center', fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 14 }}>{sticker.quantity}</span>
+          <button aria-label="Aumentar" style={{ width: 32, height: 32, borderRadius: 'var(--radius)', border: '2px solid var(--outline-variant)', background: 'var(--surface-container-lowest)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-display)', fontSize: 16, color: 'var(--on-surface)' }} onClick={inc}>
+            +
+          </button>
+          {sticker.quantity > 1 && (
+            <span style={{ borderRadius: 'var(--radius-full)', background: 'var(--secondary-container)', padding: '2px 8px', fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 600, color: 'var(--on-secondary-container)' }}>troca</span>
+          )}
+        </div>
+        <div>
+          <button
+            style={{ borderRadius: 'var(--radius)', border: sticker.is_stuck ? '2px solid var(--primary)' : '2px solid var(--outline-variant)', background: sticker.is_stuck ? 'var(--primary)' : 'var(--surface-container-lowest)', padding: '7px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', cursor: 'pointer', color: sticker.is_stuck ? 'var(--on-primary)' : 'var(--on-surface)', transition: 'all 0.15s' }}
+            disabled={!canStick}
+            onClick={toggleStuck}>
+            {sticker.is_stuck ? 'Colada' : 'Colar'}
+          </button>
+        </div>
+        <div>
+          <button
+            aria-label="Desejada"
+            style={{ width: 36, height: 36, borderRadius: 'var(--radius)', border: sticker.wishlisted ? '2px solid var(--tertiary-container)' : '2px solid var(--outline-variant)', background: sticker.wishlisted ? 'var(--tertiary-fixed-dim)' : 'var(--surface-container-lowest)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s' }}
+            onClick={toggleWish}>
+            <MatIcon name="star" size={18} fill={sticker.wishlisted} color={sticker.wishlisted ? 'var(--tertiary)' : 'var(--outline-variant)'} />
+          </button>
+        </div>
+      </article>
+    </>
   );
 }
 
@@ -503,7 +544,7 @@ function CatalogToolbar({ filter, query, sections, sectionFilter, setFilter, set
       <div style={{ position: 'relative' }}>
         <MatIcon name="search" size={18} color="var(--on-surface-variant)" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)' }} />
         <input
-          style={{ width: '100%', borderRadius: 'var(--radius)', border: '2px solid var(--outline-variant)', padding: '11px 14px 11px 38px', fontFamily: 'var(--font-body)', fontSize: 15, color: 'var(--on-surface)', background: 'var(--surface-container-lowest)', outline: 'none' }}
+          style={{ width: '100%', minHeight: 44, borderRadius: 'var(--radius)', border: '2px solid var(--outline-variant)', padding: '12px 14px 12px 38px', fontFamily: 'var(--font-body)', fontSize: 15, color: 'var(--on-surface)', background: 'var(--surface-container-lowest)', outline: 'none' }}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Buscar por código, título ou seção"
           type="search"
@@ -520,7 +561,7 @@ function CatalogToolbar({ filter, query, sections, sectionFilter, setFilter, set
           {statusOptions.map(({ v, label }) => {
             const active = filter === v;
             return (
-              <button key={v} onClick={() => setFilter(v)} style={{ flexShrink: 0, borderRadius: 'var(--radius-full)', border: active ? '2px solid var(--secondary-container)' : '2px solid var(--outline-variant)', background: active ? 'var(--secondary-container)' : 'var(--surface-container-lowest)', padding: '6px 14px', fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', color: active ? 'var(--on-secondary-container)' : 'var(--on-surface-variant)', cursor: 'pointer', transition: 'all 0.15s' }}>
+              <button key={v} onClick={() => setFilter(v)} style={{ flexShrink: 0, minHeight: 40, borderRadius: 'var(--radius-full)', border: active ? '2px solid var(--secondary-container)' : '2px solid var(--outline-variant)', background: active ? 'var(--secondary-container)' : 'var(--surface-container-lowest)', padding: '8px 16px', fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', color: active ? 'var(--on-secondary-container)' : 'var(--on-surface-variant)', cursor: 'pointer', transition: 'all 0.15s' }}>
                 {label}
               </button>
             );
@@ -528,11 +569,26 @@ function CatalogToolbar({ filter, query, sections, sectionFilter, setFilter, set
         </div>
       </div>
 
-      {/* Seletor de seção (tabs scrolláveis) */}
+      {/* Seletor de seção */}
       {sections.length > 1 && (
         <div>
           <span className="label-caps" style={{ color: 'var(--on-surface-variant)', fontSize: 9, display: 'block', marginBottom: 6 }}>Seção</span>
-          <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4 }}>
+
+          {/* Mobile: dropdown compacto (poupa espaço vertical) */}
+          <select
+            className="block w-full sm:hidden"
+            value={sectionFilter}
+            onChange={(e) => setSectionFilter(e.target.value)}
+            style={{ minHeight: 44, borderRadius: 'var(--radius)', border: '2px solid var(--outline-variant)', padding: '10px 12px', fontFamily: 'var(--font-body)', fontSize: 15, color: 'var(--on-surface)', background: 'var(--surface-container-lowest)', outline: 'none' }}
+          >
+            <option value="all">Todas as seções</option>
+            {sections.map((sec) => (
+              <option key={sec.name} value={sec.name}>{`${sec.name} (${sec.owned}/${sec.total})`}</option>
+            ))}
+          </select>
+
+          {/* Desktop/tablet: tabs scrolláveis */}
+          <div className="hidden sm:flex" style={{ gap: 6, overflowX: 'auto', paddingBottom: 4 }}>
             {[{ name: 'all', total: 0, owned: 0 }, ...sections].map((sec) => {
               const isAll = sec.name === 'all';
               const active = sectionFilter === sec.name;
@@ -540,7 +596,7 @@ function CatalogToolbar({ filter, query, sections, sectionFilter, setFilter, set
                 <button
                   key={sec.name}
                   onClick={() => setSectionFilter(sec.name)}
-                  style={{ flexShrink: 0, borderRadius: 'var(--radius-full)', border: active ? '2px solid var(--primary)' : '2px solid var(--outline-variant)', background: active ? 'var(--primary-container)' : 'var(--surface-container-lowest)', padding: '6px 14px', fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600, letterSpacing: '0.02em', color: active ? 'var(--on-primary-container)' : 'var(--on-surface-variant)', cursor: 'pointer', transition: 'all 0.15s', whiteSpace: 'nowrap' }}
+                  style={{ flexShrink: 0, minHeight: 40, borderRadius: 'var(--radius-full)', border: active ? '2px solid var(--primary)' : '2px solid var(--outline-variant)', background: active ? 'var(--primary-container)' : 'var(--surface-container-lowest)', padding: '8px 16px', fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600, letterSpacing: '0.02em', color: active ? 'var(--on-primary-container)' : 'var(--on-surface-variant)', cursor: 'pointer', transition: 'all 0.15s', whiteSpace: 'nowrap' }}
                 >
                   {isAll ? 'Todas as seções' : `${sec.name} ${sec.owned}/${sec.total}`}
                 </button>
@@ -1616,8 +1672,8 @@ function HomePage() {
               {/* ── TEAMS VIEW ─────────────────────────────────── */}
               {viewMode === 'teams' && selectedAlbum && (
                 <div className="grid gap-4 xl:grid-cols-[260px_1fr]">
-                  {/* Team selector */}
-                  <Card style={{ padding: 12 }}>
+                  {/* Team selector (sidebar) — apenas em telas largas */}
+                  <Card className="hidden xl:block" style={{ padding: 12 }}>
                     <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, padding: '0 4px' }}>
                       <CardTitle>Times</CardTitle>
                       <span className="label-caps" style={{ fontSize: 10, color: 'var(--on-surface-variant)' }}>{teams.length}</span>
@@ -1665,6 +1721,22 @@ function HomePage() {
                         </span>
                       )}
                     </div>
+                    {/* Seletor de time (mobile/tablet): dropdown em vez de scroll de chips */}
+                    {teams.length > 0 && (
+                      <div className="xl:hidden" style={{ padding: '10px 12px', borderBottom: '2px solid var(--outline-variant)' }}>
+                        <select
+                          value={activeTeam}
+                          onChange={(e) => setSelectedTeam(e.target.value)}
+                          style={{ width: '100%', minHeight: 44, borderRadius: 'var(--radius)', border: '2px solid var(--outline-variant)', padding: '10px 12px', fontFamily: 'var(--font-body)', fontSize: 15, fontWeight: 600, color: 'var(--on-surface)', background: 'var(--surface-container-lowest)', outline: 'none' }}
+                        >
+                          {teams.map((team) => (
+                            <option key={team.name} value={team.name}>
+                              {`${team.name} (${team.owned}/${team.total})${team.duplicates > 0 ? ` +${team.duplicates}` : ''}`}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
                     {/* Country info strip — only shown for team sections with country data */}
                     <CountryStrip section={activeTeam} />
                     {teamStickers.length === 0 ? (
@@ -1703,7 +1775,7 @@ function HomePage() {
                           <TextField label="Prefixo" value={generatorForm.prefix} onChange={(prefix) => setGeneratorForm({ ...generatorForm, prefix })} />
                           <NumberField label="Início" min={1} onChange={(start) => setGeneratorForm({ ...generatorForm, start })} value={generatorForm.start} />
                         </div>
-                        <div className="grid grid-cols-3 gap-3">
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                           <NumberField label="Qtd." min={1} onChange={(count) => setGeneratorForm({ ...generatorForm, count })} value={generatorForm.count} />
                           <NumberField label="Dígitos" min={1} onChange={(padding) => setGeneratorForm({ ...generatorForm, padding })} value={generatorForm.padding} />
                           <TextField label="Seção" value={generatorForm.section} onChange={(section) => setGeneratorForm({ ...generatorForm, section })} />
