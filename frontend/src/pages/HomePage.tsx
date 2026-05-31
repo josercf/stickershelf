@@ -17,7 +17,7 @@ type StickerFilter = 'all' | 'owned' | 'missing' | 'duplicates' | 'stuck' | 'wis
 type ViewMode = 'scan' | 'teams' | 'catalog' | 'trades';
 type MobileTab = 'home' | ViewMode;
 
-const emptyAlbumForm = { name: '', publisher: '', season: '', cover_url: '', total_stickers: 100 };
+const emptyAlbumForm = { name: '', label: '', publisher: '', season: '', cover_url: '', total_stickers: 100 };
 const emptyCatalogForm = { code: '', title: '', section: '' };
 const emptyGeneratorForm = { prefix: '', start: 1, count: 20, padding: 3, section: '' };
 const emptyInviteForm: { type: InviteType; value: string } = { type: 'email', value: '' };
@@ -764,6 +764,12 @@ function HomePage() {
   const [manualCode, setManualCode] = useState('');
   const [inviteForm, setInviteForm] = useState(emptyInviteForm);
   const [inviteLink, setInviteLink] = useState('');
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState('');
+  const [editingLabel, setEditingLabel] = useState(false);
+  const [labelDraft, setLabelDraft] = useState('');
+  const [shareLink, setShareLink] = useState('');
+  const [shareCopied, setShareCopied] = useState(false);
   const [session, setSession] = useState<AuthSession | null>(() => collectionStore.getSession());
   const [members, setMembers] = useState<AlbumMember[]>([]);
   const [authReady, setAuthReady] = useState(() => !window.location.hash.includes('access_token='));
@@ -868,6 +874,10 @@ function HomePage() {
     }
     setLastScan(null);
     setSelectedTeam('');
+    setEditingName(false);
+    setEditingLabel(false);
+    setShareLink('');
+    setShareCopied(false);
     stopCamera();
     loadStickers();
   }, [selectedAlbumId]);
@@ -920,6 +930,69 @@ function HomePage() {
   function handleSignOut() {
     collectionStore.signOut();
     setSession(null); setAlbums([]); setSelectedAlbumId(''); setStickers([]); setMembers([]);
+  }
+
+  function applyAlbumUpdate(updated: Album) {
+    setAlbums((cur) => cur.map((a) => (a.id === updated.id ? updated : a)));
+  }
+
+  function startEditName() {
+    if (!selectedAlbum) return;
+    setNameDraft(selectedAlbum.name);
+    setEditingName(true);
+  }
+
+  async function handleRenameAlbum() {
+    if (!selectedAlbum) return;
+    const next = nameDraft.trim();
+    if (!next) { setError('O nome do álbum não pode ficar vazio.'); return; }
+    if (next === selectedAlbum.name) { setEditingName(false); return; }
+    try {
+      setSaving(true); setError('');
+      const updated = await collectionStore.renameAlbum(selectedAlbum.id, next);
+      applyAlbumUpdate(updated);
+      setEditingName(false);
+    } catch (err) { setError(err instanceof Error ? err.message : 'Não foi possível renomear o álbum.');
+    } finally { setSaving(false); }
+  }
+
+  function startEditLabel() {
+    if (!selectedAlbum) return;
+    setLabelDraft(selectedAlbum.label || '');
+    setEditingLabel(true);
+  }
+
+  async function handleUpdateLabel() {
+    if (!selectedAlbum) return;
+    const next = labelDraft.trim();
+    if (next === (selectedAlbum.label || '')) { setEditingLabel(false); return; }
+    try {
+      setSaving(true); setError('');
+      const updated = await collectionStore.updateAlbumLabel(selectedAlbum.id, next);
+      applyAlbumUpdate(updated);
+      setEditingLabel(false);
+    } catch (err) { setError(err instanceof Error ? err.message : 'Não foi possível atualizar a descrição.');
+    } finally { setSaving(false); }
+  }
+
+  async function handleGenerateShareLink() {
+    if (!selectedAlbumId) return;
+    try {
+      setSaving(true); setError(''); setShareCopied(false);
+      const { url } = await collectionStore.generateShareLink(selectedAlbumId, 'editor');
+      setShareLink(url);
+      setMembers(await collectionStore.listMembers(selectedAlbumId));
+    } catch (err) { setError(err instanceof Error ? err.message : 'Não foi possível gerar o link de compartilhamento.');
+    } finally { setSaving(false); }
+  }
+
+  async function handleCopyShareLink() {
+    if (!shareLink) return;
+    try {
+      await navigator.clipboard.writeText(shareLink);
+      setShareCopied(true);
+      window.setTimeout(() => setShareCopied(false), 2000);
+    } catch { setError('Não foi possível copiar. Selecione o link e copie manualmente.'); }
   }
 
   async function handleInviteMember(e: FormEvent) {
@@ -1241,6 +1314,7 @@ function HomePage() {
                 <CardTitle>Novo álbum</CardTitle>
                 <form style={{ display: 'flex', flexDirection: 'column', gap: 10 }} onSubmit={handleCreateAlbum}>
                   <TextField label="Nome" value={albumForm.name} onChange={(name) => setAlbumForm({ ...albumForm, name })} />
+                  <TextField label="Descrição (opcional)" placeholder="Ex.: coleção da família" value={albumForm.label} onChange={(label) => setAlbumForm({ ...albumForm, label })} />
                   <TextField label="Editora" value={albumForm.publisher} onChange={(publisher) => setAlbumForm({ ...albumForm, publisher })} />
                   <TextField label="Ano/temporada" value={albumForm.season} onChange={(season) => setAlbumForm({ ...albumForm, season })} />
                   <TextField label="URL da capa" value={albumForm.cover_url} onChange={(cover_url) => setAlbumForm({ ...albumForm, cover_url })} />
@@ -1298,7 +1372,16 @@ function HomePage() {
                             {m.invite_type === 'link' && !m.invite_value ? 'Magic link pendente' : m.invite_value || m.email || m.user_id || 'Colaborador'}
                           </div>
                           <div className="label-caps" style={{ fontSize: 9, color: 'var(--on-surface-variant)', marginTop: 2 }}>
-                            {m.role} · {m.invite_type}{m.accepted_at ? ' · aceito' : ''}
+                            {m.role} · {m.invite_type}
+                            {m.invite_type === 'link'
+                              ? m.used_at
+                                ? ' · usado'
+                                : m.expires_at && new Date(m.expires_at).getTime() <= Date.now()
+                                ? ' · expirado'
+                                : ' · ativo'
+                              : m.accepted_at
+                              ? ' · aceito'
+                              : ''}
                           </div>
                         </div>
                       ))}
@@ -1316,8 +1399,77 @@ function HomePage() {
                 <Card>
                   <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 22, lineHeight: 1.2, color: 'var(--on-surface)' }}>{selectedAlbum.name}</div>
-                      <div className="label-caps" style={{ fontSize: 10, color: 'var(--on-surface-variant)', marginTop: 4 }}>
+                      {/* Nome do álbum — edição inline (somente owner) */}
+                      {editingName ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <input
+                            autoFocus
+                            value={nameDraft}
+                            onChange={(e) => setNameDraft(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Enter') handleRenameAlbum(); if (e.key === 'Escape') setEditingName(false); }}
+                            style={{ flex: 1, minWidth: 0, fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 22, lineHeight: 1.2, color: 'var(--on-surface)', borderRadius: 'var(--radius)', border: '2px solid var(--primary)', padding: '4px 10px', background: 'var(--surface-container-lowest)', outline: 'none' }}
+                          />
+                          <button aria-label="Salvar nome" disabled={saving} onClick={handleRenameAlbum}
+                            style={{ width: 36, height: 36, flexShrink: 0, borderRadius: 'var(--radius)', border: 'none', background: 'var(--primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <MatIcon name="check" size={18} color="var(--on-primary)" />
+                          </button>
+                          <button aria-label="Cancelar" onClick={() => setEditingName(false)}
+                            style={{ width: 36, height: 36, flexShrink: 0, borderRadius: 'var(--radius)', border: '2px solid var(--outline-variant)', background: 'var(--surface-container-lowest)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <MatIcon name="close" size={18} color="var(--on-surface-variant)" />
+                          </button>
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 22, lineHeight: 1.2, color: 'var(--on-surface)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{selectedAlbum.name}</div>
+                          {isAlbumOwner && (
+                            <button aria-label="Renomear álbum" onClick={startEditName}
+                              style={{ flexShrink: 0, width: 30, height: 30, borderRadius: 'var(--radius)', border: '2px solid var(--outline-variant)', background: 'var(--surface-container-lowest)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <MatIcon name="edit" size={15} color="var(--on-surface-variant)" />
+                            </button>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Label/descrição — edição inline (somente owner) */}
+                      {editingLabel ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6 }}>
+                          <input
+                            autoFocus
+                            maxLength={200}
+                            placeholder="Descrição do álbum"
+                            value={labelDraft}
+                            onChange={(e) => setLabelDraft(e.target.value)}
+                            onKeyDown={(e) => { if (e.key === 'Enter') handleUpdateLabel(); if (e.key === 'Escape') setEditingLabel(false); }}
+                            style={{ flex: 1, minWidth: 0, fontFamily: 'var(--font-body)', fontSize: 14, color: 'var(--on-surface)', borderRadius: 'var(--radius)', border: '2px solid var(--primary)', padding: '5px 10px', background: 'var(--surface-container-lowest)', outline: 'none' }}
+                          />
+                          <button aria-label="Salvar descrição" disabled={saving} onClick={handleUpdateLabel}
+                            style={{ width: 32, height: 32, flexShrink: 0, borderRadius: 'var(--radius)', border: 'none', background: 'var(--primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <MatIcon name="check" size={16} color="var(--on-primary)" />
+                          </button>
+                          <button aria-label="Cancelar" onClick={() => setEditingLabel(false)}
+                            style={{ width: 32, height: 32, flexShrink: 0, borderRadius: 'var(--radius)', border: '2px solid var(--outline-variant)', background: 'var(--surface-container-lowest)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <MatIcon name="close" size={16} color="var(--on-surface-variant)" />
+                          </button>
+                        </div>
+                      ) : selectedAlbum.label ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+                          <span style={{ fontFamily: 'var(--font-body)', fontSize: 14, color: 'var(--on-surface-variant)', lineHeight: 1.4 }}>{selectedAlbum.label}</span>
+                          {isAlbumOwner && (
+                            <button aria-label="Editar descrição" onClick={startEditLabel}
+                              style={{ flexShrink: 0, width: 24, height: 24, borderRadius: 'var(--radius-sm)', border: 'none', background: 'transparent', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                              <MatIcon name="edit" size={13} color="var(--outline)" />
+                            </button>
+                          )}
+                        </div>
+                      ) : isAlbumOwner ? (
+                        <button onClick={startEditLabel}
+                          style={{ marginTop: 4, background: 'none', border: 'none', cursor: 'pointer', padding: 0, display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--secondary)', fontFamily: 'var(--font-body)', fontSize: 13 }}>
+                          <MatIcon name="add" size={14} color="var(--secondary)" />
+                          Adicionar descrição
+                        </button>
+                      ) : null}
+
+                      <div className="label-caps" style={{ fontSize: 10, color: 'var(--on-surface-variant)', marginTop: 8 }}>
                         {stats.totalRegistered} figurinhas no catálogo
                       </div>
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 6, marginTop: 12 }}>
@@ -1332,6 +1484,28 @@ function HomePage() {
                   <div style={{ marginTop: 14 }}>
                     <ProgressSegments pct={stats.completion} />
                   </div>
+
+                  {/* Compartilhar via link de uso único (somente owner) */}
+                  {isAlbumOwner && (
+                    <div style={{ marginTop: 14, borderTop: '1px solid var(--outline-variant)', paddingTop: 14 }}>
+                      <SecondaryButton full disabled={saving} icon="share" onClick={handleGenerateShareLink}>
+                        Compartilhar álbum
+                      </SecondaryButton>
+                      {shareLink && (
+                        <div style={{ marginTop: 12, borderRadius: 'var(--radius)', border: '2px solid var(--primary)', background: 'var(--primary-container)', padding: 12 }}>
+                          <div className="label-caps" style={{ color: 'var(--on-primary-container)', display: 'block', marginBottom: 6 }}>
+                            Link de uso único · expira em 48h
+                          </div>
+                          <p style={{ fontFamily: 'var(--font-mono)', fontSize: 11, wordBreak: 'break-all', color: 'var(--on-primary-container)', margin: '0 0 10px', lineHeight: 1.4 }}>{shareLink}</p>
+                          <button onClick={handleCopyShareLink}
+                            style={{ width: '100%', borderRadius: 'var(--radius)', border: 'none', background: 'var(--primary)', padding: '10px 14px', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--on-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                            <MatIcon name={shareCopied ? 'check' : 'content_copy'} size={16} color="var(--on-primary)" />
+                            {shareCopied ? 'Copiado!' : 'Copiar link'}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </Card>
               ) : (
                 <Card>

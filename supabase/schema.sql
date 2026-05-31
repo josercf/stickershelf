@@ -4,6 +4,7 @@ create table if not exists public.albums (
   id uuid primary key default gen_random_uuid(),
   owner_id uuid references auth.users(id) on delete set null,
   name text not null,
+  label varchar(200),
   publisher text,
   season text,
   cover_url text,
@@ -15,6 +16,9 @@ create table if not exists public.albums (
 alter table public.albums
 add column if not exists owner_id uuid references auth.users(id) on delete set null;
 
+alter table public.albums
+add column if not exists label varchar(200);
+
 create table if not exists public.album_members (
   id uuid primary key default gen_random_uuid(),
   album_id uuid not null references public.albums(id) on delete cascade,
@@ -24,6 +28,8 @@ create table if not exists public.album_members (
   invite_value text,
   invite_token uuid,
   accepted_at timestamptz,
+  expires_at timestamptz,
+  used_at timestamptz,
   role text not null default 'editor' check (role in ('owner', 'editor', 'viewer')),
   created_at timestamptz not null default now()
 );
@@ -33,7 +39,9 @@ add column if not exists user_id uuid references auth.users(id) on delete cascad
 add column if not exists invite_type text not null default 'email' check (invite_type in ('email', 'username', 'phone', 'link')),
 add column if not exists invite_value text,
 add column if not exists invite_token uuid,
-add column if not exists accepted_at timestamptz;
+add column if not exists accepted_at timestamptz,
+add column if not exists expires_at timestamptz,
+add column if not exists used_at timestamptz;
 
 alter table public.album_members
 alter column email drop not null;
@@ -182,6 +190,50 @@ as $$
   );
 $$;
 
+-- Criacao de album via RPC (SECURITY DEFINER): contorna um quirk de RLS do
+-- PostgREST no INSERT WITH CHECK direto. Define owner_id = auth.uid() internamente
+-- e aceita label/descricao opcional.
+drop function if exists public.create_album_for_current_user(text, text, text, text, integer);
+
+create or replace function public.create_album_for_current_user(
+  p_name text,
+  p_publisher text default null,
+  p_season text default null,
+  p_cover_url text default null,
+  p_total_stickers integer default 0,
+  p_label text default null
+)
+returns public.albums
+security definer
+set search_path = public
+language plpgsql
+as $$
+declare
+  new_album public.albums;
+begin
+  if auth.uid() is null then
+    raise exception 'Authentication required';
+  end if;
+
+  insert into public.albums (owner_id, name, publisher, season, cover_url, total_stickers, label)
+  values (
+    auth.uid(),
+    p_name,
+    p_publisher,
+    p_season,
+    p_cover_url,
+    coalesce(p_total_stickers, 0),
+    p_label
+  )
+  returning * into new_album;
+
+  return new_album;
+end;
+$$;
+
+-- Aceite de convite por link de uso unico:
+-- so aceita se o link nao foi usado (used_at is null) e nao expirou.
+-- Ao aceitar, preenche user_id e marca used_at, inutilizando o link.
 create or replace function public.accept_album_invite(invite_token_value uuid)
 returns setof public.album_members
 security definer
@@ -203,10 +255,12 @@ begin
         lower(nullif(auth.jwt() -> 'raw_user_meta_data' ->> 'username', '')),
         auth.uid()::text
       ),
-      accepted_at = coalesce(accepted_at, now())
+      accepted_at = coalesce(accepted_at, now()),
+      used_at = now()
   where invite_token = invite_token_value
     and invite_type = 'link'
-    and (user_id is null or user_id = auth.uid())
+    and used_at is null
+    and (expires_at is null or expires_at > now())
   returning *;
 end;
 $$;
@@ -232,10 +286,11 @@ create policy "Authenticated create albums"
 on public.albums for insert
 with check (auth.uid() is not null and owner_id = auth.uid());
 
+-- Rename/label do album: apenas o owner. Editores editam figurinhas, nao o album.
 create policy "Owners update albums"
 on public.albums for update
-using (public.can_edit_album(id))
-with check (public.can_edit_album(id));
+using (auth.uid() = owner_id)
+with check (auth.uid() = owner_id);
 
 create policy "Owners delete albums"
 on public.albums for delete

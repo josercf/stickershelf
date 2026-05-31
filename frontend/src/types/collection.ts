@@ -1,6 +1,7 @@
 export type Album = {
   id: string;
   name: string;
+  label: string | null;
   owner_id: string | null;
   publisher: string | null;
   season: string | null;
@@ -19,6 +20,8 @@ export type AlbumMember = {
   invite_value: string | null;
   invite_token: string | null;
   accepted_at: string | null;
+  expires_at: string | null;
+  used_at: string | null;
   role: 'owner' | 'editor' | 'viewer';
   created_at: string;
 };
@@ -59,6 +62,7 @@ export type Sticker = {
 
 export type AlbumInput = {
   name: string;
+  label?: string;
   owner_id?: string | null;
   publisher?: string;
   season?: string;

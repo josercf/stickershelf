@@ -159,3 +159,120 @@ describe('collectionStore — renovação de token', () => {
     expect(window.localStorage.getItem('stickershelf.supabaseSession')).not.toBeNull();
   });
 });
+
+describe('collectionStore — rename, label e compartilhamento', () => {
+  const ORIGINAL_ENV = process.env;
+  let fetchMock: jest.Mock;
+
+  beforeEach(() => {
+    jest.resetModules();
+    process.env = { ...ORIGINAL_ENV };
+    window.localStorage.clear();
+    // jsdom não expõe Web Crypto; o invite por link usa crypto.randomUUID()
+    if (!global.crypto?.randomUUID) {
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      (global as unknown as { crypto: Crypto }).crypto = require('crypto').webcrypto;
+    }
+    // sessão válida por 1h → nenhum refresh é disparado nestes testes
+    seedSession(NOW_SECONDS() + 3600);
+    fetchMock = jest.fn();
+    global.fetch = fetchMock as unknown as typeof fetch;
+  });
+
+  afterEach(() => {
+    process.env = ORIGINAL_ENV;
+    jest.restoreAllMocks();
+  });
+
+  function bodyOf(call: [RequestInfo | URL, RequestInit?]) {
+    return JSON.parse(String(call[1]?.body || '{}'));
+  }
+
+  it('renameAlbum envia PATCH com o novo nome (trim) para a linha do álbum', async () => {
+    const { collectionStore } = loadStore();
+    fetchMock.mockResolvedValue(jsonResponse([{ id: 'alb-1', name: 'Novo Nome' }]));
+
+    const result = await collectionStore.renameAlbum('alb-1', '  Novo Nome  ');
+
+    expect(result).toEqual({ id: 'alb-1', name: 'Novo Nome' });
+    const call = fetchMock.mock.calls[0];
+    expect(String(call[0])).toContain('/albums?id=eq.alb-1');
+    expect(call[1]?.method).toBe('PATCH');
+    expect(bodyOf(call)).toEqual({ name: 'Novo Nome' });
+  });
+
+  it('renameAlbum rejeita nome vazio sem chamar a API', async () => {
+    const { collectionStore } = loadStore();
+    await expect(collectionStore.renameAlbum('alb-1', '   ')).rejects.toThrow();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('updateAlbumLabel envia PATCH com a descrição', async () => {
+    const { collectionStore } = loadStore();
+    fetchMock.mockResolvedValue(jsonResponse([{ id: 'alb-1', label: 'Coleção da família' }]));
+
+    await collectionStore.updateAlbumLabel('alb-1', '  Coleção da família  ');
+
+    const call = fetchMock.mock.calls[0];
+    expect(call[1]?.method).toBe('PATCH');
+    expect(bodyOf(call)).toEqual({ label: 'Coleção da família' });
+  });
+
+  it('updateAlbumLabel envia null quando a descrição é apagada', async () => {
+    const { collectionStore } = loadStore();
+    fetchMock.mockResolvedValue(jsonResponse([{ id: 'alb-1', label: null }]));
+
+    await collectionStore.updateAlbumLabel('alb-1', '   ');
+
+    expect(bodyOf(fetchMock.mock.calls[0])).toEqual({ label: null });
+  });
+
+  it('generateShareLink cria um link com token, expiração ~48h e devolve a URL', async () => {
+    const { collectionStore } = loadStore();
+    fetchMock.mockImplementation(async (_url: string, init?: RequestInit) => {
+      const sent = JSON.parse(String(init?.body || '{}'));
+      // ecoa o que foi enviado para validarmos token/expiração
+      return jsonResponse([{ ...sent, id: 'mem-1' }]);
+    });
+
+    const before = Date.now();
+    const { url, member } = await collectionStore.generateShareLink('alb-1');
+    const after = Date.now();
+
+    const call = fetchMock.mock.calls[0];
+    expect(String(call[0])).toContain('/album_members');
+    expect(call[1]?.method).toBe('POST');
+
+    const sent = bodyOf(call);
+    expect(sent.invite_type).toBe('link');
+    expect(typeof sent.invite_token).toBe('string');
+    expect(sent.invite_token).toBeTruthy();
+    expect(sent.expires_at).toBeTruthy();
+
+    // expira ~48h no futuro (com folga para o tempo de execução do teste)
+    const expiresMs = new Date(sent.expires_at).getTime();
+    const FORTY_EIGHT_H = 48 * 60 * 60 * 1000;
+    expect(expiresMs).toBeGreaterThanOrEqual(before + FORTY_EIGHT_H - 1000);
+    expect(expiresMs).toBeLessThanOrEqual(after + FORTY_EIGHT_H + 1000);
+
+    expect(url).toContain(`invite=${member.invite_token}`);
+  });
+
+  it('acceptInvite chama a RPC accept_album_invite com o token', async () => {
+    const { collectionStore } = loadStore();
+    fetchMock.mockResolvedValue(jsonResponse([{ id: 'mem-1', album_id: 'alb-1', used_at: '2026-05-30T00:00:00Z' }]));
+
+    const member = await collectionStore.acceptInvite('  tok-123  ');
+
+    expect(member?.album_id).toBe('alb-1');
+    const call = fetchMock.mock.calls[0];
+    expect(String(call[0])).toContain('/rpc/accept_album_invite');
+    expect(bodyOf(call)).toEqual({ invite_token_value: 'tok-123' });
+  });
+
+  it('acceptInvite devolve null para token vazio sem chamar a API', async () => {
+    const { collectionStore } = loadStore();
+    await expect(collectionStore.acceptInvite('   ')).resolves.toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

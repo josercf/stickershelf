@@ -25,6 +25,7 @@ const seedAlbums: Album[] = [
   {
     id: 'demo-world-cup',
     name: 'Copa do Mundo 2026',
+    label: 'Album de demonstracao',
     owner_id: null,
     publisher: 'Panini',
     season: '2026',
@@ -340,8 +341,12 @@ async function supabaseAuthRequest<T>(path: string, init: RequestInit = {}): Pro
   return response.json() as Promise<T>;
 }
 
+// Janela de validade do link de compartilhamento de uso unico: 48h.
+const SHARE_LINK_TTL_MS = 48 * 60 * 60 * 1000;
+
 const cleanAlbumInput = (input: AlbumInput) => ({
   name: input.name.trim(),
+  label: input.label?.trim() || null,
   owner_id: input.owner_id || null,
   publisher: input.publisher?.trim() || null,
   season: input.season?.trim() || null,
@@ -479,6 +484,7 @@ export const collectionStore = {
           p_season: payload.season ?? null,
           p_cover_url: payload.cover_url ?? null,
           p_total_stickers: payload.total_stickers,
+          p_label: payload.label ?? null,
         }),
       });
       if (session?.user?.email) {
@@ -514,12 +520,15 @@ export const collectionStore = {
   async inviteCollaborator(albumId: string, inviteType: InviteType, inviteValue: string, role: AlbumMember['role'] = 'editor'): Promise<AlbumMember> {
     const token = inviteType === 'link' ? crypto.randomUUID() : null;
     const normalizedValue = inviteType === 'link' ? null : normalizeInviteValue(inviteType, inviteValue);
+    // Links expiram em 48h; demais convites (email/username/phone) nao expiram.
+    const expiresAt = inviteType === 'link' ? new Date(Date.now() + SHARE_LINK_TTL_MS).toISOString() : null;
     const payload = {
       album_id: albumId,
       email: inviteType === 'email' ? normalizedValue : null,
       invite_type: inviteType,
       invite_value: normalizedValue,
       invite_token: token,
+      expires_at: expiresAt,
       role,
     };
 
@@ -541,7 +550,15 @@ export const collectionStore = {
       user_id: null,
       created_at: now(),
       accepted_at: null,
+      used_at: null,
     };
+  },
+
+  // Gera um link de compartilhamento de uso unico (expira em 48h).
+  // Cada chamada cria um novo token, permitindo varios links independentes.
+  async generateShareLink(albumId: string, role: AlbumMember['role'] = 'editor'): Promise<{ member: AlbumMember; url: string }> {
+    const member = await this.inviteCollaborator(albumId, 'link', '', role);
+    return { member, url: this.getInviteLink(member) };
   },
 
   async acceptInvite(token: string): Promise<AlbumMember | null> {
@@ -551,6 +568,47 @@ export const collectionStore = {
       body: JSON.stringify({ invite_token_value: token.trim() }),
     });
     return member || null;
+  },
+
+  // Renomeia o album (apenas owner, garantido pela RLS "Owners update albums").
+  async renameAlbum(albumId: string, name: string): Promise<Album> {
+    const trimmed = name.trim();
+    if (!trimmed) throw new Error('O nome do album nao pode ficar vazio.');
+
+    if (isSupabaseConfigured) {
+      const [album] = await supabaseRequest<Album[]>(`albums?id=eq.${encodeURIComponent(albumId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ name: trimmed }),
+      });
+      return album;
+    }
+
+    const albums = readLocal<Album[]>(localAlbumsKey, seedAlbums);
+    const updated = albums.map((album) => (album.id === albumId ? { ...album, name: trimmed, updated_at: now() } : album));
+    writeLocal(localAlbumsKey, updated);
+    const album = updated.find((item) => item.id === albumId);
+    if (!album) throw new Error('Album nao encontrado.');
+    return album;
+  },
+
+  // Atualiza o label/descricao do album (apenas owner). Aceita vazio para limpar.
+  async updateAlbumLabel(albumId: string, label: string): Promise<Album> {
+    const value = label.trim().slice(0, 200) || null;
+
+    if (isSupabaseConfigured) {
+      const [album] = await supabaseRequest<Album[]>(`albums?id=eq.${encodeURIComponent(albumId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ label: value }),
+      });
+      return album;
+    }
+
+    const albums = readLocal<Album[]>(localAlbumsKey, seedAlbums);
+    const updated = albums.map((album) => (album.id === albumId ? { ...album, label: value, updated_at: now() } : album));
+    writeLocal(localAlbumsKey, updated);
+    const album = updated.find((item) => item.id === albumId);
+    if (!album) throw new Error('Album nao encontrado.');
+    return album;
   },
 
   getInviteLink(member: AlbumMember): string {
