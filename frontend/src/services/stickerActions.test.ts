@@ -1,5 +1,5 @@
 import { Sticker } from '../types/collection';
-import { decrementPatch, deckGhostCount, incrementPatch, needsStuckRemovalConfirm } from './stickerActions';
+import { carouselLayout, decrementPatch, deckGhostCount, incrementPatch, needsStuckRemovalConfirm } from './stickerActions';
 
 function makeSticker(overrides: Partial<Sticker> = {}): Sticker {
   return {
@@ -87,5 +87,37 @@ describe('stickerActions — deckGhostCount (efeito de deck)', () => {
   it('desenha no máximo 2 cartas atrás para 3 ou mais repetidas', () => {
     expect(deckGhostCount(3)).toBe(2);
     expect(deckGhostCount(10)).toBe(2);
+  });
+});
+
+describe('stickerActions — carouselLayout (mobile = carrossel, desktop = grade)', () => {
+  it('no mobile usa carrossel horizontal com 1 card grande por vez (swipe)', () => {
+    const { container, card } = carouselLayout(false);
+    // Container: flex em linha, sem quebra, rolagem horizontal com scroll-snap.
+    expect(container.display).toBe('flex');
+    expect(container.flexDirection).toBe('row');
+    expect(container.flexWrap).toBe('nowrap');
+    expect(container.overflowX).toBe('auto');
+    expect(container.scrollSnapType).toBe('x mandatory');
+    expect(container.WebkitOverflowScrolling).toBe('touch');
+    // Nunca pode ser grade no mobile (causa raiz do bug: grade minúscula).
+    expect(container.display).not.toBe('grid');
+    expect(container.gridTemplateColumns).toBeUndefined();
+    // Card: não encolhe e ocupa quase toda a largura da tela, centralizado no snap.
+    expect(card.flex).toBe('0 0 auto');
+    expect(card.width).toBe('calc(100vw - 48px)');
+    expect(card.maxWidth).toBe(360);
+    expect(card.scrollSnapAlign).toBe('center');
+  });
+
+  it('no desktop usa grade de cards (sem carrossel)', () => {
+    const { container, card } = carouselLayout(true);
+    expect(container.display).toBe('grid');
+    expect(container.gridTemplateColumns).toContain('minmax(240px, 1fr)');
+    expect(container.overflowX).toBeUndefined();
+    expect(container.scrollSnapType).toBeUndefined();
+    // No desktop o card não força largura fixa (deixa a grade dimensionar).
+    expect(card.width).toBeUndefined();
+    expect(card.flex).toBeUndefined();
   });
 });
