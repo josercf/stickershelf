@@ -107,19 +107,6 @@ function readSession(): AuthSession | null {
   return JSON.parse(stored) as AuthSession;
 }
 
-// auth.uid() in Supabase is always the JWT's `sub` claim.
-// Using it directly as owner_id guarantees the RLS check passes.
-function sessionUserId(session: AuthSession | null): string | null {
-  if (!session) return null;
-  try {
-    const [, b64] = session.access_token.split('.');
-    const payload = JSON.parse(atob(b64.replace(/-/g, '+').replace(/_/g, '/')));
-    return payload.sub || session.user?.id || null;
-  } catch {
-    return session.user?.id || null;
-  }
-}
-
 function writeSession(session: AuthSession | null) {
   if (!session) {
     window.localStorage.removeItem(sessionKey);
