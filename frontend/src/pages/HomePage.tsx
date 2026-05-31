@@ -1,6 +1,7 @@
 import React, { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Album, AlbumMember, AuthSession, CatalogStickerInput, CollectionStats, InviteType, Sticker, StickerPatch } from '../types/collection';
 import { collectionStore, isSupabaseConfigured, normalizeStickerCode } from '../services/collectionStore';
+import { filterStickers, groupBySection, sectionSummaries } from '../services/catalogFilters';
 import { buildPaniniWorldCup2026Catalog, paniniWorldCup2026Album } from '../data/paniniWorldCup2026';
 import { getCountryBySection } from '../data/countries';
 import jsQR from 'jsqr';
@@ -36,6 +37,7 @@ function getStats(album: Album | undefined, stickers: Sticker[]): CollectionStat
 function initials(value: string) {
   return value.split(' ').filter(Boolean).slice(0, 2).map((p) => p[0]?.toUpperCase()).join('');
 }
+
 
 /* ============================================================================
    DESIGN SYSTEM PRIMITIVES
@@ -403,9 +405,14 @@ function StickerRow({ onPatch, sticker }: { onPatch: (patch: StickerPatch) => vo
    CATALOG TABLE
    ========================================================================== */
 
-function StickerTable({ loading, onPatch, stickers }: {
-  loading: boolean; onPatch: (sticker: Sticker, patch: StickerPatch) => void; stickers: Sticker[];
+function StickerTable({ loading, onPatch, stickers, grouped }: {
+  loading: boolean; onPatch: (sticker: Sticker, patch: StickerPatch) => void; stickers: Sticker[]; grouped: boolean;
 }) {
+  // Quando grouped, agrupa por seção com um cabeçalho por grupo, deixando o
+  // catálogo navegável mesmo com centenas de figurinhas. Caso contrário (uma
+  // única seção já selecionada), renderiza a lista plana.
+  const groups: Array<[string, Sticker[]]> = grouped ? groupBySection(stickers) : [['', stickers]];
+
   return (
     <Card style={{ padding: 0, overflow: 'hidden' }}>
       <div style={{ display: 'grid', gridTemplateColumns: '100px 1fr 120px 150px 120px 80px', gap: 12, padding: '10px 16px', background: 'var(--surface-container)', borderBottom: '2px solid var(--outline-variant)' }} className="hidden sm:grid">
@@ -416,11 +423,23 @@ function StickerTable({ loading, onPatch, stickers }: {
       {loading ? (
         <EmptyState icon="hourglass_empty" title="Carregando catálogo" description="Buscando as figurinhas do álbum selecionado." />
       ) : stickers.length === 0 ? (
-        <EmptyState icon="style" title="Catálogo vazio" description="Gere uma sequência ou adicione figurinhas ao catálogo." />
+        <EmptyState icon="filter_alt_off" title="Nada por aqui" description="Nenhuma figurinha bate com os filtros selecionados." />
       ) : (
         <div>
-          {stickers.map((s) => (
-            <StickerRow key={s.id} onPatch={(p) => onPatch(s, p)} sticker={s} />
+          {groups.map(([name, items]) => (
+            <div key={name || 'todas'} id={name ? `secao-${name}` : undefined} style={{ scrollMarginTop: 140 }}>
+              {name && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '8px 16px', background: 'var(--surface-container-high)', borderTop: '1px solid var(--outline-variant)', borderBottom: '2px solid var(--outline-variant)' }}>
+                  <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 13, color: 'var(--on-surface)' }}>{name}</span>
+                  <span className="label-caps" style={{ fontSize: 10, color: 'var(--on-surface-variant)' }}>
+                    {items.filter((s) => s.quantity > 0).length}/{items.length}
+                  </span>
+                </div>
+              )}
+              {items.map((s) => (
+                <StickerRow key={s.id} onPatch={(p) => onPatch(s, p)} sticker={s} />
+              ))}
+            </div>
           ))}
         </div>
       )}
@@ -464,12 +483,23 @@ function ScanResultCard({ lastScan }: { lastScan: Sticker | null }) {
    CATALOG TOOLBAR
    ========================================================================== */
 
-function CatalogToolbar({ filter, query, setFilter, setQuery }: {
+function CatalogToolbar({ filter, query, sections, sectionFilter, setFilter, setQuery, setSectionFilter }: {
   filter: StickerFilter; query: string;
-  setFilter: (f: StickerFilter) => void; setQuery: (q: string) => void;
+  sections: { name: string; total: number; owned: number }[]; sectionFilter: string;
+  setFilter: (f: StickerFilter) => void; setQuery: (q: string) => void; setSectionFilter: (s: string) => void;
 }) {
+  const statusOptions: { v: StickerFilter; label: string }[] = [
+    { v: 'all', label: 'Todas' },
+    { v: 'owned', label: 'Tenho' },
+    { v: 'missing', label: 'Faltando' },
+    { v: 'duplicates', label: 'Repetidas' },
+    { v: 'stuck', label: 'Coladas' },
+    { v: 'wishlist', label: 'Desejadas' },
+  ];
+
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+    // Barra fixa abaixo do app bar (56px): mantém busca, status e seção sempre visíveis.
+    <div style={{ position: 'sticky', top: 56, zIndex: 30, background: 'var(--surface-container-lowest)', border: '2px solid var(--outline-variant)', borderRadius: 'var(--radius-lg)', padding: 12, boxShadow: 'var(--shadow-card)', display: 'flex', flexDirection: 'column', gap: 10 }}>
       <div style={{ position: 'relative' }}>
         <MatIcon name="search" size={18} color="var(--on-surface-variant)" style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)' }} />
         <input
@@ -482,23 +512,43 @@ function CatalogToolbar({ filter, query, setFilter, setQuery }: {
           onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--outline-variant)'; }}
         />
       </div>
-      <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4 }}>
-        {([
-          { v: 'all', label: 'Todas' },
-          { v: 'owned', label: 'Tenho' },
-          { v: 'missing', label: 'Faltando' },
-          { v: 'duplicates', label: 'Repetidas' },
-          { v: 'stuck', label: 'Coladas' },
-          { v: 'wishlist', label: 'Desejadas' },
-        ] as { v: StickerFilter; label: string }[]).map(({ v, label }) => {
-          const active = filter === v;
-          return (
-            <button key={v} onClick={() => setFilter(v)} style={{ flexShrink: 0, borderRadius: 'var(--radius-full)', border: active ? '2px solid var(--secondary-container)' : '2px solid var(--outline-variant)', background: active ? 'var(--secondary-container)' : 'var(--surface-container-lowest)', padding: '6px 14px', fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', color: active ? 'var(--on-secondary-container)' : 'var(--on-surface-variant)', cursor: 'pointer', transition: 'all 0.15s' }}>
-              {label}
-            </button>
-          );
-        })}
+
+      {/* Filtro por status */}
+      <div>
+        <span className="label-caps" style={{ color: 'var(--on-surface-variant)', fontSize: 9, display: 'block', marginBottom: 6 }}>Status</span>
+        <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4 }}>
+          {statusOptions.map(({ v, label }) => {
+            const active = filter === v;
+            return (
+              <button key={v} onClick={() => setFilter(v)} style={{ flexShrink: 0, borderRadius: 'var(--radius-full)', border: active ? '2px solid var(--secondary-container)' : '2px solid var(--outline-variant)', background: active ? 'var(--secondary-container)' : 'var(--surface-container-lowest)', padding: '6px 14px', fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', color: active ? 'var(--on-secondary-container)' : 'var(--on-surface-variant)', cursor: 'pointer', transition: 'all 0.15s' }}>
+                {label}
+              </button>
+            );
+          })}
+        </div>
       </div>
+
+      {/* Seletor de seção (tabs scrolláveis) */}
+      {sections.length > 1 && (
+        <div>
+          <span className="label-caps" style={{ color: 'var(--on-surface-variant)', fontSize: 9, display: 'block', marginBottom: 6 }}>Seção</span>
+          <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 4 }}>
+            {[{ name: 'all', total: 0, owned: 0 }, ...sections].map((sec) => {
+              const isAll = sec.name === 'all';
+              const active = sectionFilter === sec.name;
+              return (
+                <button
+                  key={sec.name}
+                  onClick={() => setSectionFilter(sec.name)}
+                  style={{ flexShrink: 0, borderRadius: 'var(--radius-full)', border: active ? '2px solid var(--primary)' : '2px solid var(--outline-variant)', background: active ? 'var(--primary-container)' : 'var(--surface-container-lowest)', padding: '6px 14px', fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600, letterSpacing: '0.02em', color: active ? 'var(--on-primary-container)' : 'var(--on-surface-variant)', cursor: 'pointer', transition: 'all 0.15s', whiteSpace: 'nowrap' }}
+                >
+                  {isAll ? 'Todas as seções' : `${sec.name} ${sec.owned}/${sec.total}`}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -776,6 +826,8 @@ function HomePage() {
   const [lastScan, setLastScan] = useState<Sticker | null>(null);
   const [filter, setFilter] = useState<StickerFilter>('all');
   const [query, setQuery] = useState('');
+  const [sectionFilter, setSectionFilter] = useState('all');
+  const [showBackToTop, setShowBackToTop] = useState(false);
   const [viewMode, setViewMode] = useState<ViewMode>('teams');
   const [mobileTab, setMobileTab] = useState<MobileTab>('home');
   const [loading, setLoading] = useState(true);
@@ -804,14 +856,11 @@ function HomePage() {
   }, [stickers]);
   const activeTeam = selectedTeam || teams[0]?.name || '';
   const teamStickers = useMemo(() => stickers.filter((s) => (s.section || 'Sem time') === activeTeam), [activeTeam, stickers]);
-  const filteredStickers = useMemo(() => {
-    const nq = query.trim().toLowerCase();
-    return stickers.filter((s) => {
-      const mq = !nq || [s.code, s.title, s.section || '', s.notes || ''].join(' ').toLowerCase().includes(nq);
-      const mf = filter === 'all' || (filter === 'owned' && s.quantity > 0) || (filter === 'missing' && s.quantity === 0) || (filter === 'duplicates' && s.quantity > 1) || (filter === 'stuck' && s.is_stuck) || (filter === 'wishlist' && s.wishlisted);
-      return mq && mf;
-    });
-  }, [filter, query, stickers]);
+  const catalogSections = useMemo(() => sectionSummaries(stickers), [stickers]);
+  const filteredStickers = useMemo(
+    () => filterStickers(stickers, { query, status: filter, section: sectionFilter }),
+    [filter, query, sectionFilter, stickers]
+  );
 
   function handleMobileTab(tab: MobileTab) {
     setMobileTab(tab);
@@ -874,6 +923,7 @@ function HomePage() {
     }
     setLastScan(null);
     setSelectedTeam('');
+    setSectionFilter('all');
     setEditingName(false);
     setEditingLabel(false);
     setShareLink('');
@@ -881,6 +931,14 @@ function HomePage() {
     stopCamera();
     loadStickers();
   }, [selectedAlbumId]);
+
+  // Botão "voltar ao topo" aparece após rolar a página.
+  useEffect(() => {
+    const onScroll = () => setShowBackToTop(window.scrollY > 600);
+    window.addEventListener('scroll', onScroll, { passive: true });
+    onScroll();
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
 
   useEffect(() => {
     async function loadMembers() {
@@ -1661,8 +1719,8 @@ function HomePage() {
                     </Card>
                   </div>
 
-                  <CatalogToolbar filter={filter} query={query} setFilter={setFilter} setQuery={setQuery} />
-                  <StickerTable loading={loading} onPatch={patchSticker} stickers={filteredStickers} />
+                  <CatalogToolbar filter={filter} query={query} sections={catalogSections} sectionFilter={sectionFilter} setFilter={setFilter} setQuery={setQuery} setSectionFilter={setSectionFilter} />
+                  <StickerTable loading={loading} onPatch={patchSticker} stickers={filteredStickers} grouped={sectionFilter === 'all'} />
                 </>
               )}
 
@@ -1718,6 +1776,18 @@ function HomePage() {
           </div>
         </div>
       </div>
+
+      {/* ── BOTÃO VOLTAR AO TOPO ──────────────────────────────────── */}
+      {showBackToTop && (
+        <button
+          aria-label="Voltar ao topo"
+          onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+          className="btn-tactile"
+          style={{ position: 'fixed', right: 16, bottom: 'calc(84px + env(safe-area-inset-bottom))', zIndex: 45, width: 48, height: 48, borderRadius: '50%', background: 'var(--primary)', border: 'none', color: 'var(--on-primary)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 4px 0 0 var(--on-primary-fixed-variant)' }}
+        >
+          <MatIcon name="arrow_upward" size={24} color="var(--on-primary)" />
+        </button>
+      )}
 
       {/* ── MOBILE BOTTOM NAV ─────────────────────────────────────── */}
       <nav
