@@ -1630,8 +1630,12 @@ function HomePage() {
           </div>
         )}
 
-        <div className="p-4 lg:p-6" style={{ display: 'grid', gap: 16, alignItems: 'start' }}>
-          <div className="lg:grid lg:grid-cols-[300px_1fr]" style={{ gap: 16, display: 'grid' }}>
+        <div className="p-4 lg:p-6" style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr)', gap: 16, alignItems: 'start' }}>
+          {/* Sem display:grid no mobile: um grid de coluna `auto` cresceria até o
+              max-content do carrossel (centenas de px), estourando a largura e
+              quebrando o overflow horizontal. No mobile fica em bloco; o grid de
+              2 colunas só entra no desktop via Tailwind (lg:grid). */}
+          <div className="lg:grid lg:grid-cols-[300px_1fr] min-w-0" style={{ gap: 16 }}>
 
             {/* ══ SIDEBAR / HOME TAB ══════════════════════════════ */}
             <aside className={`space-y-4 ${mobileTab !== 'home' ? 'hidden lg:block' : 'block'}`}>
@@ -1795,7 +1799,7 @@ function HomePage() {
             </aside>
 
             {/* ══ MAIN CONTENT ════════════════════════════════════ */}
-            <section className={`space-y-4 screen-in ${mobileTab === 'home' ? 'hidden lg:block' : 'block'}`}>
+            <section className={`space-y-4 screen-in min-w-0 ${mobileTab === 'home' ? 'hidden lg:block' : 'block'}`}>
 
               {/* Album header */}
               {selectedAlbum ? (
