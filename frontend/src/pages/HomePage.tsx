@@ -1712,7 +1712,7 @@ function HomePage() {
                   Panini Copa 2026
                 </button>
                 <p style={{ marginTop: 8, fontSize: 12, color: 'var(--on-surface-variant)', lineHeight: 1.5 }}>
-                  Cria 990 posições: introdução/FWC, 48 seleções (20 cada), especiais e Coca-Cola.
+                  Cria 994 posições: introdução/FWC, 48 seleções (20 cada) e 14 Coca-Cola.
                 </p>
               </Card>
 
