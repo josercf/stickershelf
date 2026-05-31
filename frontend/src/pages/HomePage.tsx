@@ -2,6 +2,8 @@ import React, { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Album, AlbumMember, AuthSession, CatalogStickerInput, CollectionStats, InviteType, Sticker, StickerPatch } from '../types/collection';
 import { collectionStore, isSupabaseConfigured, normalizeStickerCode } from '../services/collectionStore';
 import { buildPaniniWorldCup2026Catalog, paniniWorldCup2026Album } from '../data/paniniWorldCup2026';
+import { getCountryBySection } from '../data/countries';
+import jsQR from 'jsqr';
 
 declare global {
   interface Window {
@@ -502,6 +504,152 @@ function CatalogToolbar({ filter, query, setFilter, setQuery }: {
 }
 
 /* ============================================================================
+   COUNTRY STRIP
+   ========================================================================== */
+
+function FlagCSS({ colors, style: flagStyle = 'horizontal', size = 32 }: {
+  colors: [string, string, string];
+  style?: 'horizontal' | 'vertical';
+  size?: number;
+}) {
+  const gradient = flagStyle === 'horizontal'
+    ? `linear-gradient(to bottom, ${colors[0]} 33.3%, ${colors[1]} 33.3%, ${colors[1]} 66.6%, ${colors[2]} 66.6%)`
+    : `linear-gradient(to right, ${colors[0]} 33.3%, ${colors[1]} 33.3%, ${colors[1]} 66.6%, ${colors[2]} 66.6%)`;
+  return (
+    <div style={{
+      width: size * 1.5,
+      height: size,
+      borderRadius: 3,
+      background: gradient,
+      border: '1px solid rgba(0,0,0,0.15)',
+      flexShrink: 0,
+    }} />
+  );
+}
+
+function CountryStrip({ section }: { section: string }) {
+  const country = getCountryBySection(section);
+  if (!country) return null;
+
+  const mapsUrl = `https://www.google.com/maps/search/${encodeURIComponent(country.mapsQuery)}`;
+
+  return (
+    <div style={{
+      borderBottom: '2px solid var(--outline-variant)',
+      padding: '12px 16px',
+      background: 'var(--surface-container-low)',
+      display: 'flex',
+      flexDirection: 'column',
+      gap: 10,
+    }}>
+      {/* Header: flag + country name + map button */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <FlagCSS colors={country.flag.colors} style={country.flag.style} size={28} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{
+            fontFamily: 'var(--font-display)',
+            fontWeight: 700,
+            fontSize: 15,
+            color: 'var(--on-surface)',
+            lineHeight: 1.2,
+          }}>
+            {country.name}
+          </div>
+        </div>
+        <a
+          href={mapsUrl}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 4,
+            borderRadius: 'var(--radius)',
+            border: '2px solid var(--outline-variant)',
+            background: 'var(--surface-container-lowest)',
+            padding: '5px 10px',
+            fontFamily: 'var(--font-mono)',
+            fontSize: 10,
+            fontWeight: 600,
+            textTransform: 'uppercase',
+            letterSpacing: '0.04em',
+            color: 'var(--on-surface)',
+            textDecoration: 'none',
+            flexShrink: 0,
+            transition: 'all 0.15s',
+          }}
+        >
+          <MatIcon name="map" size={14} color="var(--primary)" />
+          Ver no mapa
+        </a>
+      </div>
+
+      {/* Data chips */}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+        {[
+          { label: 'Capital', value: country.capital },
+          { label: 'Idioma', value: country.language },
+          { label: 'Pop.', value: country.population },
+          { label: 'Voo do BR', value: country.flightFromBrazil },
+        ].map(({ label, value }) => (
+          <div
+            key={label}
+            style={{
+              borderRadius: 'var(--radius)',
+              border: '1px solid var(--outline-variant)',
+              background: 'var(--surface-container-lowest)',
+              padding: '4px 10px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 1,
+            }}
+          >
+            <span
+              className="label-caps"
+              style={{ color: 'var(--on-surface-variant)', fontSize: 9, display: 'block' }}
+            >
+              {label}
+            </span>
+            <span
+              style={{
+                fontFamily: 'var(--font-body)',
+                fontWeight: 600,
+                fontSize: 12,
+                color: 'var(--on-surface)',
+                lineHeight: 1.2,
+              }}
+            >
+              {value}
+            </span>
+          </div>
+        ))}
+      </div>
+
+      {/* Fun fact */}
+      <div style={{
+        borderRadius: 'var(--radius)',
+        background: 'var(--primary-container)',
+        border: '1px solid var(--outline-variant)',
+        padding: '7px 10px',
+        display: 'flex',
+        alignItems: 'flex-start',
+        gap: 6,
+      }}>
+        <MatIcon name="lightbulb" size={14} color="var(--on-primary-container)" style={{ marginTop: 1, flexShrink: 0 }} />
+        <span style={{
+          fontFamily: 'var(--font-body)',
+          fontSize: 12,
+          color: 'var(--on-primary-container)',
+          lineHeight: 1.5,
+        }}>
+          {country.funFact}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/* ============================================================================
    LOGIN PAGE
    ========================================================================== */
 
@@ -848,12 +996,15 @@ function HomePage() {
 
   async function startCamera() {
     if (!selectedAlbumId) { setError('Selecione um álbum antes de ler figurinhas.'); return; }
-    if (!window.BarcodeDetector) { setCameraMessage('Leitura automática indisponível neste navegador. Use o campo de código.'); return; }
     try {
       setError(''); setCameraMessage('');
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } }, audio: false });
       streamRef.current = stream;
       if (videoRef.current) { videoRef.current.srcObject = stream; await videoRef.current.play(); }
+      const usingNative = !!window.BarcodeDetector;
+      if (!usingNative) {
+        setCameraMessage('Modo QR Code (Safari/iOS): aponte a câmera para um QR code. Barcodes EAN requerem Chrome.');
+      }
       setScanRunning(true); scanCamera();
     } catch { setCameraMessage('Não foi possível acessar a câmera. Confira a permissão do navegador.'); }
   }
@@ -864,17 +1015,43 @@ function HomePage() {
   }
 
   async function scanCamera() {
-    const detector = window.BarcodeDetector ? new window.BarcodeDetector() : null;
-    if (!detector) return;
+    const useNative = !!window.BarcodeDetector;
+    const detector = useNative ? new window.BarcodeDetector!() : null;
+
+    // Canvas usado apenas no fallback jsQR
+    const canvas = useNative ? null : document.createElement('canvas');
+    const ctx = canvas ? canvas.getContext('2d', { willReadFrequently: true }) : null;
+
     const loop = async () => {
       if (!streamRef.current || !videoRef.current) return;
       try {
-        const codes = await detector.detect(videoRef.current);
-        const raw = codes[0]?.rawValue;
-        if (raw && !scanLockRef.current) {
-          scanLockRef.current = true;
-          await registerCode(raw);
-          window.setTimeout(() => { scanLockRef.current = false; }, 1400);
+        if (detector) {
+          // Caminho nativo (Chrome/Android) — suporta QR code, EAN, Code 128 etc.
+          const codes = await detector.detect(videoRef.current);
+          const raw = codes[0]?.rawValue;
+          if (raw && !scanLockRef.current) {
+            scanLockRef.current = true;
+            await registerCode(raw);
+            window.setTimeout(() => { scanLockRef.current = false; }, 1400);
+          }
+        } else if (canvas && ctx) {
+          // Fallback jsQR (Safari/iOS) — suporta apenas QR codes
+          const video = videoRef.current;
+          const w = video.videoWidth;
+          const h = video.videoHeight;
+          if (w > 0 && h > 0) {
+            canvas.width = w;
+            canvas.height = h;
+            ctx.drawImage(video, 0, 0, w, h);
+            const imageData = ctx.getImageData(0, 0, w, h);
+            const result = jsQR(imageData.data, w, h, { inversionAttempts: 'dontInvert' });
+            const raw = result?.data;
+            if (raw && !scanLockRef.current) {
+              scanLockRef.current = true;
+              await registerCode(raw);
+              window.setTimeout(() => { scanLockRef.current = false; }, 1400);
+            }
+          }
         }
       } catch { setCameraMessage('Não foi possível ler a imagem da câmera.'); }
       window.requestAnimationFrame(loop);
@@ -1252,6 +1429,8 @@ function HomePage() {
                         </span>
                       )}
                     </div>
+                    {/* Country info strip — only shown for team sections with country data */}
+                    <CountryStrip section={activeTeam} />
                     {teamStickers.length === 0 ? (
                       <EmptyState icon="style" title="Sem figurinhas neste time" description="Use o catálogo para cadastrar as figurinhas por time." />
                     ) : (
