@@ -18,7 +18,6 @@ type MobileTab = 'home' | ViewMode;
 const emptyAlbumForm = { name: '', publisher: '', season: '', cover_url: '', total_stickers: 100 };
 const emptyCatalogForm = { code: '', title: '', section: '' };
 const emptyGeneratorForm = { prefix: '', start: 1, count: 20, padding: 3, section: '' };
-const emptyLoginForm = { email: '', password: '' };
 const emptyInviteForm: { type: InviteType; value: string } = { type: 'email', value: '' };
 
 function getStats(album: Album | undefined, stickers: Sticker[]): CollectionStats {
@@ -503,6 +502,107 @@ function CatalogToolbar({ filter, query, setFilter, setQuery }: {
 }
 
 /* ============================================================================
+   LOGIN PAGE
+   ========================================================================== */
+
+function LoginPage({ onLogin }: { onLogin: (s: AuthSession) => void }) {
+  const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [form, setForm] = useState({ email: '', password: '' });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+  const [confirmSent, setConfirmSent] = useState(false);
+
+  async function handleLogin(e: FormEvent) {
+    e.preventDefault();
+    if (!form.password) { setError('Informe a senha.'); return; }
+    try {
+      setSaving(true); setError('');
+      onLogin(await collectionStore.loginWithPassword(form.email, form.password));
+    } catch (err) {
+      const m = err instanceof Error ? err.message : '';
+      setError(m.includes('Invalid login credentials') || m.includes('invalid_grant')
+        ? 'E-mail ou senha incorretos.'
+        : m.includes('Email not confirmed')
+        ? 'Confirme seu e-mail antes de entrar. Verifique sua caixa de entrada.'
+        : m || 'Não foi possível fazer login.');
+    } finally { setSaving(false); }
+  }
+
+  async function handleRegister(e: FormEvent) {
+    e.preventDefault();
+    if (form.password.length < 6) { setError('A senha precisa ter pelo menos 6 caracteres.'); return; }
+    try {
+      setSaving(true); setError('');
+      const result = await collectionStore.signUp(form.email, form.password);
+      if (result === 'confirmation-sent') { setConfirmSent(true); } else { onLogin(result); }
+    } catch (err) {
+      const m = err instanceof Error ? err.message : '';
+      setError(m.includes('already registered') ? 'Este e-mail já tem conta. Tente fazer login.' : m || 'Não foi possível criar a conta.');
+    } finally { setSaving(false); }
+  }
+
+  const linkBtn: React.CSSProperties = { background: 'none', border: 'none', cursor: 'pointer', fontSize: 14, color: 'var(--secondary)', textDecoration: 'underline', fontFamily: 'var(--font-body)', padding: '4px 0' };
+
+  return (
+    <div className="paper-texture screen-in" style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+      <div style={{ width: '100%', maxWidth: 400, background: 'var(--surface-container-lowest)', border: '4px solid var(--on-surface)', borderRadius: 'var(--radius-lg)', boxShadow: '8px 8px 0 0 var(--on-surface)', position: 'relative', padding: 32 }}>
+        {/* tape */}
+        <div style={{ position: 'absolute', top: -14, left: '50%', transform: 'translateX(-50%) rotate(2deg)', width: 80, height: 22, background: 'rgba(255,185,95,.45)', backdropFilter: 'blur(2px)' }} />
+
+        {/* logo */}
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8, marginBottom: 28 }}>
+          <div style={{ width: 60, height: 60, borderRadius: '50%', background: 'var(--primary-container)', border: '2px solid var(--on-surface)', boxShadow: '4px 4px 0 0 var(--on-surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', transform: 'rotate(-3deg)' }}>
+            <MatIcon name="style" size={30} fill color="var(--on-primary-container)" />
+          </div>
+          <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 34, color: 'var(--primary)', letterSpacing: '-0.02em' }}>StickerShelf</div>
+          <div style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 16, color: 'var(--on-surface-variant)' }}>
+            {mode === 'login' ? 'Entre na sua coleção' : 'Crie sua conta'}
+          </div>
+        </div>
+
+        {error && (
+          <div style={{ marginBottom: 16, borderRadius: 'var(--radius)', background: 'var(--error-container)', border: '2px solid var(--error)', padding: '10px 14px', fontSize: 14, color: 'var(--on-error-container)' }}>
+            {error}
+          </div>
+        )}
+
+        {confirmSent ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ borderRadius: 'var(--radius)', background: 'var(--primary-container)', padding: 16, fontSize: 14, color: 'var(--on-primary-container)', lineHeight: 1.6, textAlign: 'center' }}>
+              <strong>Confirme seu e-mail!</strong><br />
+              Enviamos um link para <strong>{form.email}</strong>.<br />
+              Clique nele para ativar sua conta.
+            </div>
+            <SecondaryButton full onClick={() => { setConfirmSent(false); setMode('login'); }}>
+              Já confirmei — fazer login
+            </SecondaryButton>
+          </div>
+        ) : mode === 'login' ? (
+          <form style={{ display: 'flex', flexDirection: 'column', gap: 14 }} onSubmit={handleLogin}>
+            <TextField label="E-mail" type="email" value={form.email} onChange={(v) => setForm({ ...form, email: v })} />
+            <TextField label="Senha" type="password" value={form.password} onChange={(v) => setForm({ ...form, password: v })} />
+            <PrimaryButton full disabled={saving} icon="login" style={{ marginTop: 4 }}>Entrar</PrimaryButton>
+            <div style={{ textAlign: 'center' }}>
+              <button type="button" style={linkBtn} onClick={() => { setMode('register'); setError(''); }}>Criar conta</button>
+            </div>
+          </form>
+        ) : (
+          <form style={{ display: 'flex', flexDirection: 'column', gap: 14 }} onSubmit={handleRegister}>
+            <TextField label="E-mail" type="email" value={form.email} onChange={(v) => setForm({ ...form, email: v })} />
+            <TextField label="Senha (mín. 6 caracteres)" type="password" value={form.password} onChange={(v) => setForm({ ...form, password: v })} />
+            <PrimaryButton full disabled={saving} icon="person_add" style={{ marginTop: 4 }}>Criar conta</PrimaryButton>
+            <div style={{ textAlign: 'center' }}>
+              <button type="button" style={linkBtn} onClick={() => { setMode('login'); setError(''); }}>Já tenho conta — fazer login</button>
+            </div>
+          </form>
+        )}
+      </div>
+      <p className="label-caps" style={{ color: 'var(--outline)', marginTop: 24, fontSize: 10 }}>StickerShelf · Copa do Mundo 2026</p>
+    </div>
+  );
+}
+
+/* ============================================================================
    HOME PAGE
    ========================================================================== */
 
@@ -514,13 +614,11 @@ function HomePage() {
   const [catalogForm, setCatalogForm] = useState(emptyCatalogForm);
   const [generatorForm, setGeneratorForm] = useState(emptyGeneratorForm);
   const [manualCode, setManualCode] = useState('');
-  const [loginForm, setLoginForm] = useState(emptyLoginForm);
   const [inviteForm, setInviteForm] = useState(emptyInviteForm);
   const [inviteLink, setInviteLink] = useState('');
   const [session, setSession] = useState<AuthSession | null>(() => collectionStore.getSession());
   const [members, setMembers] = useState<AlbumMember[]>([]);
-  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
-  const [registerConfirmSent, setRegisterConfirmSent] = useState(false);
+  const [authReady, setAuthReady] = useState(() => !window.location.hash.includes('access_token='));
   const [lastScan, setLastScan] = useState<Sticker | null>(null);
   const [filter, setFilter] = useState<StickerFilter>('all');
   const [query, setQuery] = useState('');
@@ -537,7 +635,6 @@ function HomePage() {
 
   const selectedAlbum = albums.find((a) => a.id === selectedAlbumId);
   const isAlbumOwner = Boolean(selectedAlbum && session?.user.id && selectedAlbum.owner_id === session.user.id);
-  const pendingInviteToken = new URLSearchParams(window.location.search).get('invite');
   const stats = useMemo(() => getStats(selectedAlbum, stickers), [selectedAlbum, stickers]);
   const duplicates = useMemo(() => stickers.filter((s) => s.quantity > 1), [stickers]);
   const [selectedTeam, setSelectedTeam] = useState('');
@@ -587,9 +684,11 @@ function HomePage() {
     async function consumeAuthRedirect() {
       try {
         const next = await collectionStore.consumeAuthRedirect();
-        if (next?.access_token) { setSession(next); setLoginForm(emptyLoginForm); }
+        if (next?.access_token) { setSession(next); }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Não foi possível concluir o login pelo link.');
+      } finally {
+        setAuthReady(true);
       }
     }
     consumeAuthRedirect();
@@ -659,45 +758,6 @@ function HomePage() {
     } finally { setSaving(false); }
   }
 
-  async function handlePasswordLogin(e: FormEvent) {
-    e.preventDefault();
-    if (!loginForm.password) { setError('Informe a senha.'); return; }
-    try {
-      setSaving(true); setError('');
-      const next = await collectionStore.loginWithPassword(loginForm.email, loginForm.password);
-      setSession(next); setLoginForm(emptyLoginForm);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : '';
-      if (msg.includes('Invalid login credentials') || msg.includes('invalid_grant')) {
-        setError('E-mail ou senha incorretos.');
-      } else if (msg.includes('Email not confirmed')) {
-        setError('Confirme seu e-mail antes de entrar. Verifique sua caixa de entrada.');
-      } else {
-        setError(msg || 'Não foi possível fazer login.');
-      }
-    } finally { setSaving(false); }
-  }
-
-  async function handleSignUp(e: FormEvent) {
-    e.preventDefault();
-    if (!loginForm.password || loginForm.password.length < 6) { setError('A senha precisa ter pelo menos 6 caracteres.'); return; }
-    try {
-      setSaving(true); setError('');
-      const result = await collectionStore.signUp(loginForm.email, loginForm.password);
-      if (result === 'confirmation-sent') {
-        setRegisterConfirmSent(true);
-      } else {
-        setSession(result); setLoginForm(emptyLoginForm); setAuthMode('login');
-      }
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : '';
-      if (msg.includes('already registered') || msg.includes('User already registered')) {
-        setError('Este e-mail já tem uma conta. Tente fazer login.');
-      } else {
-        setError(msg || 'Não foi possível criar a conta.');
-      }
-    } finally { setSaving(false); }
-  }
 
   function handleSignOut() {
     collectionStore.signOut();
@@ -839,6 +899,18 @@ function HomePage() {
   ];
 
   /* ── RENDER ───────────────────────────────────────────────────── */
+  if (!authReady) {
+    return (
+      <div className="paper-texture" style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <MatIcon name="hourglass_empty" size={40} color="var(--outline-variant)" />
+      </div>
+    );
+  }
+
+  if (isSupabaseConfigured && !session) {
+    return <LoginPage onLogin={setSession} />;
+  }
+
   return (
     <div
       className="paper-texture"
@@ -904,57 +976,13 @@ function HomePage() {
               {/* Auth section */}
               <Card>
                 <CardTitle>Identidade</CardTitle>
-                {!isSupabaseConfigured ? (
-                  <p style={{ fontSize: 14, color: 'var(--on-surface-variant)', lineHeight: 1.5 }}>Configure o Supabase para usar login e colaboração.</p>
-                ) : session ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    <div style={{ borderRadius: 'var(--radius)', background: 'var(--primary-container)', padding: '10px 14px', fontSize: 14, fontFamily: 'var(--font-body)', color: 'var(--on-primary-container)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <MatIcon name="person" size={18} fill color="var(--on-primary-container)" />
-                      {session.user.email || 'Conectado'}
-                    </div>
-                    <SecondaryButton full onClick={handleSignOut}>Sair</SecondaryButton>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div style={{ borderRadius: 'var(--radius)', background: 'var(--primary-container)', padding: '10px 14px', fontSize: 14, fontFamily: 'var(--font-body)', color: 'var(--on-primary-container)', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <MatIcon name="person" size={18} fill color="var(--on-primary-container)" />
+                    {session?.user.email || 'Conectado'}
                   </div>
-                ) : registerConfirmSent ? (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    <div style={{ borderRadius: 'var(--radius)', background: 'var(--primary-container)', padding: '12px 14px', fontSize: 14, color: 'var(--on-primary-container)', lineHeight: 1.5 }}>
-                      <strong>Confirme seu e-mail!</strong> Enviamos um link para <strong>{loginForm.email}</strong>. Clique nele para ativar sua conta.
-                    </div>
-                    <SecondaryButton full onClick={() => { setRegisterConfirmSent(false); setAuthMode('login'); }}>
-                      Já confirmei — fazer login
-                    </SecondaryButton>
-                  </div>
-                ) : authMode === 'login' ? (
-                  <form style={{ display: 'flex', flexDirection: 'column', gap: 10 }} onSubmit={handlePasswordLogin}>
-                    {pendingInviteToken && (
-                      <div style={{ borderRadius: 'var(--radius)', background: 'var(--primary-container)', padding: '10px 14px', fontSize: 13, color: 'var(--on-primary-container)' }}>
-                        Entre para aceitar o convite do álbum.
-                      </div>
-                    )}
-                    <TextField label="E-mail" value={loginForm.email} onChange={(email) => setLoginForm({ ...loginForm, email })} />
-                    <TextField label="Senha" type="password" value={loginForm.password} onChange={(password) => setLoginForm({ ...loginForm, password })} />
-                    <PrimaryButton full disabled={saving} icon="login">Entrar</PrimaryButton>
-                    <button
-                      type="button"
-                      onClick={() => { setAuthMode('register'); setError(''); }}
-                      style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: 'var(--secondary)', textDecoration: 'underline', padding: '4px 0', fontFamily: 'var(--font-body)' }}
-                    >
-                      Criar conta
-                    </button>
-                  </form>
-                ) : (
-                  <form style={{ display: 'flex', flexDirection: 'column', gap: 10 }} onSubmit={handleSignUp}>
-                    <TextField label="E-mail" value={loginForm.email} onChange={(email) => setLoginForm({ ...loginForm, email })} />
-                    <TextField label="Senha (mín. 6 caracteres)" type="password" value={loginForm.password} onChange={(password) => setLoginForm({ ...loginForm, password })} />
-                    <PrimaryButton full disabled={saving} icon="person_add">Criar conta</PrimaryButton>
-                    <button
-                      type="button"
-                      onClick={() => { setAuthMode('login'); setError(''); }}
-                      style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: 13, color: 'var(--secondary)', textDecoration: 'underline', padding: '4px 0', fontFamily: 'var(--font-body)' }}
-                    >
-                      Já tenho conta — fazer login
-                    </button>
-                  </form>
-                )}
+                  <SecondaryButton full onClick={handleSignOut}>Sair</SecondaryButton>
+                </div>
               </Card>
 
               {/* Albums list */}
