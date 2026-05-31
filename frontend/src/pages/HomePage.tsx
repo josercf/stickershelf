@@ -2,7 +2,7 @@ import React, { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Album, AlbumMember, AuthSession, CatalogStickerInput, CollectionStats, InviteType, Sticker, StickerPatch } from '../types/collection';
 import { collectionStore, isSupabaseConfigured, normalizeStickerCode } from '../services/collectionStore';
 import { filterStickers, groupBySection, sectionSummaries } from '../services/catalogFilters';
-import { STUCK_REMOVAL_CONFIRM_MESSAGE, decrementPatch, incrementPatch, needsStuckRemovalConfirm } from '../services/stickerActions';
+import { STUCK_REMOVAL_CONFIRM_MESSAGE, decrementPatch, deckGhostCount, incrementPatch, needsStuckRemovalConfirm } from '../services/stickerActions';
 import { buildPaniniWorldCup2026Catalog, paniniWorldCup2026Album } from '../data/paniniWorldCup2026';
 import { flagEmoji, getCountryBySection } from '../data/countries';
 import jsQR from 'jsqr';
@@ -354,16 +354,40 @@ function TeamStickerCard({ onPatch, sticker }: { onPatch: (patch: StickerPatch) 
 }
 
 /* ============================================================================
-   STICKER TABLE ROW
+   CATALOG: CARROSSEL VISUAL (mobile-first)
    ========================================================================== */
 
-function StickerRow({ onPatch, sticker }: { onPatch: (patch: StickerPatch) => void; sticker: Sticker }) {
+// Face da figurinha (imagem ou placeholder): a carta da frente do deck.
+function StickerFace({ sticker }: { sticker: Sticker }) {
+  const initialsText = initials(sticker.section || sticker.title || sticker.code);
+  return (
+    <div style={{ position: 'absolute', inset: 0, zIndex: 3, borderRadius: 8, border: '2px solid var(--outline-variant)', background: 'var(--surface-container-lowest)', padding: 6, boxShadow: 'var(--shadow-sticker)' }}>
+      <div style={{ width: '100%', height: '100%', borderRadius: 5, overflow: 'hidden', border: '1px solid var(--surface-container)', background: 'linear-gradient(160deg, var(--surface-container-low), var(--surface-container-high))' }}>
+        {sticker.image_url ? (
+          <img alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} src={sticker.image_url} />
+        ) : (
+          <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 10, textAlign: 'center' }}>
+            <div style={{ width: 56, height: 56, borderRadius: '50%', border: '2px solid var(--outline-variant)', background: 'rgba(255,255,255,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 20, color: 'var(--primary)' }}>
+              {initialsText || 'SS'}
+            </div>
+            <div style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 14, lineHeight: 1.2, color: 'var(--on-surface)' }}>{sticker.title}</div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Card grande do carrossel: figurinha com efeito de deck (repetidas) + controles.
+function StickerDeckCard({ onPatch, sticker, index, total }: {
+  onPatch: (patch: StickerPatch) => void; sticker: Sticker; index: number; total: number;
+}) {
   const isOwned = sticker.quantity > 0;
   const canStick = isOwned || sticker.is_stuck;
+  // 2 repetidas: 1 carta atrás. 3+ repetidas: 2 cartas atrás (máximo visual).
+  const ghosts = deckGhostCount(sticker.quantity);
 
-  // Ações compartilhadas entre o card mobile e a linha da tabela (desktop).
-  // Antes de decrementar uma figurinha colada, pede confirmação para evitar
-  // remoções acidentais de figurinhas já coladas no álbum.
+  // Confirma antes de remover uma figurinha colada (evita remoção acidental).
   const dec = () => {
     if (needsStuckRemovalConfirm(sticker) && !window.confirm(STUCK_REMOVAL_CONFIRM_MESSAGE)) return;
     onPatch(decrementPatch(sticker));
@@ -372,143 +396,133 @@ function StickerRow({ onPatch, sticker }: { onPatch: (patch: StickerPatch) => vo
   const toggleStuck = () => onPatch({ is_stuck: !sticker.is_stuck, quantity: sticker.quantity || 1, owned: true });
   const toggleWish = () => onPatch({ wishlisted: !sticker.wishlisted });
 
-  const stepperButton: React.CSSProperties = { width: 44, height: 44, borderRadius: 'var(--radius)', border: '2px solid var(--outline-variant)', background: 'var(--surface-container-lowest)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-display)', fontSize: 20, color: 'var(--on-surface)', flexShrink: 0 };
-  const statusPill = (
-    <span style={{ display: 'inline-block', borderRadius: 'var(--radius-full)', padding: '5px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', background: isOwned ? 'var(--primary-container)' : 'var(--surface-container)', color: isOwned ? 'var(--on-primary-container)' : 'var(--on-surface-variant)' }}>
-      {isOwned ? 'Tenho' : 'Falta'}
-    </span>
-  );
+  const ghostStyle: React.CSSProperties = { position: 'absolute', inset: 0, borderRadius: 8, border: '2px solid var(--outline-variant)', background: 'var(--surface-container-low)', boxShadow: 'var(--shadow-sticker)' };
+  const stepBtn: React.CSSProperties = { width: 46, height: 46, borderRadius: 'var(--radius)', border: '2px solid var(--outline-variant)', background: 'var(--surface-container-lowest)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-display)', fontSize: 22, color: 'var(--on-surface)', flexShrink: 0 };
 
   return (
-    <>
-      {/* ── MOBILE CARD (< sm) ── */}
-      {/* display controlado pelas classes Tailwind (flex / sm:hidden), por isso não há display inline */}
-      <article className="flex flex-col sm:hidden" style={{ gap: 10, padding: 12, borderBottom: '1px solid var(--surface-container)' }}>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
-          <div style={{ width: 52, flexShrink: 0 }}>
-            <StickerVisual compact sticker={sticker} />
-          </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <span style={{ fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600, color: 'var(--on-surface-variant)' }}>{sticker.code}</span>
-            <div style={{ fontFamily: 'var(--font-body)', fontWeight: 600, fontSize: 15, color: 'var(--on-surface)', lineHeight: 1.25 }}>{sticker.title}</div>
-            <div style={{ fontSize: 13, color: 'var(--on-surface-variant)' }}>{sticker.section || 'Sem seção'}</div>
-          </div>
-          <button aria-label="Desejada" onClick={toggleWish}
-            style={{ width: 44, height: 44, flexShrink: 0, borderRadius: 'var(--radius)', border: sticker.wishlisted ? '2px solid var(--tertiary-container)' : '2px solid var(--outline-variant)', background: sticker.wishlisted ? 'var(--tertiary-fixed-dim)' : 'var(--surface-container-lowest)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <MatIcon name="star" size={20} fill={sticker.wishlisted} color={sticker.wishlisted ? 'var(--tertiary)' : 'var(--outline-variant)'} />
-          </button>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          {statusPill}
-          {sticker.quantity > 1 && (
-            <span style={{ borderRadius: 'var(--radius-full)', background: 'var(--secondary-container)', padding: '3px 8px', fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 600, color: 'var(--on-secondary-container)' }}>troca</span>
-          )}
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
-            <button aria-label="Diminuir" style={stepperButton} onClick={dec}>−</button>
-            <span style={{ minWidth: 28, textAlign: 'center', fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 16 }}>{sticker.quantity}</span>
-            <button aria-label="Aumentar" style={stepperButton} onClick={inc}>+</button>
-          </div>
-        </div>
+    <article style={{ display: 'flex', flexDirection: 'column', gap: 12, height: '100%', background: 'var(--surface-container-lowest)', border: '2px solid var(--outline-variant)', borderRadius: 'var(--radius-lg)', padding: 14, boxShadow: 'var(--shadow-card)' }}>
+      {/* Posição na seção + badge de quantidade */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: 22 }}>
+        <span className="label-caps" style={{ fontSize: 10, color: 'var(--on-surface-variant)' }}>{index + 1}/{total}</span>
+        {sticker.quantity > 1 && (
+          <span style={{ borderRadius: 'var(--radius-full)', background: 'var(--secondary)', color: '#fff', fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 700, padding: '3px 10px' }}>x{sticker.quantity}</span>
+        )}
+      </div>
+
+      {/* Figurinha com efeito de deck */}
+      <div style={{ position: 'relative', width: '70%', maxWidth: 200, margin: '2px auto 4px', aspectRatio: '3 / 4' }}>
+        {ghosts >= 2 && <div style={{ ...ghostStyle, transform: 'rotate(-7deg) translate(-12px, 7px)', zIndex: 1 }} />}
+        {ghosts >= 1 && <div style={{ ...ghostStyle, transform: 'rotate(6deg) translate(11px, 5px)', zIndex: 2 }} />}
+        <StickerFace sticker={sticker} />
+      </div>
+
+      {/* Código, título e status */}
+      <div style={{ textAlign: 'center' }}>
+        <div className="label-caps" style={{ fontSize: 10, color: 'var(--on-surface-variant)' }}>{sticker.code}</div>
+        <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 16, color: 'var(--on-surface)', lineHeight: 1.2, marginTop: 2 }}>{sticker.title}</div>
+        <span style={{ display: 'inline-block', marginTop: 6, borderRadius: 'var(--radius-full)', padding: '3px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', background: isOwned ? 'var(--primary-container)' : 'var(--surface-container)', color: isOwned ? 'var(--on-primary-container)' : 'var(--on-surface-variant)' }}>
+          {isOwned ? 'Tenho' : 'Falta'}
+        </span>
+      </div>
+
+      {/* Stepper: [-1] [quantidade] [+1] */}
+      <div style={{ marginTop: 'auto', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
+        <button aria-label="Remover uma" style={stepBtn} onClick={dec}>−</button>
+        <span style={{ minWidth: 36, textAlign: 'center', fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 20, color: 'var(--on-surface)' }}>{sticker.quantity}</span>
+        <button aria-label="Adicionar repetida" style={stepBtn} onClick={inc}>+</button>
+      </div>
+
+      {/* Colar + desejo */}
+      <div style={{ display: 'flex', gap: 8 }}>
         <button
-          style={{ width: '100%', minHeight: 44, borderRadius: 'var(--radius)', border: sticker.is_stuck ? '2px solid var(--primary)' : '2px solid var(--outline-variant)', background: sticker.is_stuck ? 'var(--primary)' : 'var(--surface-container-lowest)', padding: '10px 12px', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', cursor: canStick ? 'pointer' : 'not-allowed', color: sticker.is_stuck ? 'var(--on-primary)' : 'var(--on-surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, opacity: canStick ? 1 : 0.5 }}
+          style={{ flex: 1, minHeight: 46, borderRadius: 'var(--radius)', border: sticker.is_stuck ? '2px solid var(--primary)' : '2px solid var(--outline-variant)', background: sticker.is_stuck ? 'var(--primary)' : 'var(--surface-container-lowest)', padding: '10px 12px', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', cursor: canStick ? 'pointer' : 'not-allowed', color: sticker.is_stuck ? 'var(--on-primary)' : 'var(--on-surface)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, opacity: canStick ? 1 : 0.5 }}
           disabled={!canStick}
           onClick={toggleStuck}>
           <MatIcon name={sticker.is_stuck ? 'task_alt' : 'add_circle'} size={16} color={sticker.is_stuck ? 'var(--on-primary)' : 'var(--on-surface)'} />
-          {sticker.is_stuck ? 'Colada no álbum' : 'Marcar como colada'}
+          {sticker.is_stuck ? 'Colada' : 'Colar'}
         </button>
-      </article>
-
-      {/* ── DESKTOP TABLE ROW (sm+) ── */}
-      <article className="hidden sm:grid" style={{ gridTemplateColumns: '100px 1fr 120px 150px 120px 80px', gap: 12, padding: '12px 16px', borderBottom: '1px solid var(--surface-container)' }}>
-        <div>
-          <span style={{ fontFamily: 'var(--font-mono)', fontSize: 13, fontWeight: 600, color: 'var(--on-surface)' }}>{sticker.code}</span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-          <div style={{ width: 44, flexShrink: 0 }}>
-            <StickerVisual compact sticker={sticker} />
-          </div>
-          <div style={{ minWidth: 0 }}>
-            <div style={{ fontFamily: 'var(--font-body)', fontWeight: 600, fontSize: 14, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--on-surface)' }}>{sticker.title}</div>
-            <div style={{ fontSize: 13, color: 'var(--on-surface-variant)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sticker.section || 'Sem seção'}</div>
-          </div>
-        </div>
-        <div>{statusPill}</div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <button aria-label="Diminuir" style={{ width: 32, height: 32, borderRadius: 'var(--radius)', border: '2px solid var(--outline-variant)', background: 'var(--surface-container-lowest)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-display)', fontSize: 16, color: 'var(--on-surface)' }} onClick={dec}>
-            −
-          </button>
-          <span style={{ width: 28, textAlign: 'center', fontFamily: 'var(--font-mono)', fontWeight: 600, fontSize: 14 }}>{sticker.quantity}</span>
-          <button aria-label="Aumentar" style={{ width: 32, height: 32, borderRadius: 'var(--radius)', border: '2px solid var(--outline-variant)', background: 'var(--surface-container-lowest)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-display)', fontSize: 16, color: 'var(--on-surface)' }} onClick={inc}>
-            +
-          </button>
-          {sticker.quantity > 1 && (
-            <span style={{ borderRadius: 'var(--radius-full)', background: 'var(--secondary-container)', padding: '2px 8px', fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 600, color: 'var(--on-secondary-container)' }}>troca</span>
-          )}
-        </div>
-        <div>
-          <button
-            style={{ borderRadius: 'var(--radius)', border: sticker.is_stuck ? '2px solid var(--primary)' : '2px solid var(--outline-variant)', background: sticker.is_stuck ? 'var(--primary)' : 'var(--surface-container-lowest)', padding: '7px 12px', fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', cursor: 'pointer', color: sticker.is_stuck ? 'var(--on-primary)' : 'var(--on-surface)', transition: 'all 0.15s' }}
-            disabled={!canStick}
-            onClick={toggleStuck}>
-            {sticker.is_stuck ? 'Colada' : 'Colar'}
-          </button>
-        </div>
-        <div>
-          <button
-            aria-label="Desejada"
-            style={{ width: 36, height: 36, borderRadius: 'var(--radius)', border: sticker.wishlisted ? '2px solid var(--tertiary-container)' : '2px solid var(--outline-variant)', background: sticker.wishlisted ? 'var(--tertiary-fixed-dim)' : 'var(--surface-container-lowest)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.15s' }}
-            onClick={toggleWish}>
-            <MatIcon name="star" size={18} fill={sticker.wishlisted} color={sticker.wishlisted ? 'var(--tertiary)' : 'var(--outline-variant)'} />
-          </button>
-        </div>
-      </article>
-    </>
+        <button aria-label="Desejada"
+          style={{ width: 46, height: 46, flexShrink: 0, borderRadius: 'var(--radius)', border: sticker.wishlisted ? '2px solid var(--tertiary-container)' : '2px solid var(--outline-variant)', background: sticker.wishlisted ? 'var(--tertiary-fixed-dim)' : 'var(--surface-container-lowest)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          onClick={toggleWish}>
+          <MatIcon name="star" size={20} fill={sticker.wishlisted} color={sticker.wishlisted ? 'var(--tertiary)' : 'var(--outline-variant)'} />
+        </button>
+      </div>
+    </article>
   );
 }
 
-/* ============================================================================
-   CATALOG TABLE
-   ========================================================================== */
+// Monta o conteúdo só quando perto da viewport (lazy), reservando a altura.
+// Evita renderizar centenas de cards de uma vez quando "Todas as seções".
+function LazySection({ minHeight, children }: { minHeight: number; children: React.ReactNode }) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [visible, setVisible] = useState(typeof IntersectionObserver === 'undefined');
+  useEffect(() => {
+    if (visible || !ref.current) return;
+    const el = ref.current;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setVisible(true);
+          io.disconnect();
+        }
+      },
+      { rootMargin: '700px 0px' }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [visible]);
+  return <div ref={ref} style={{ minHeight: visible ? undefined : minHeight }}>{visible ? children : null}</div>;
+}
 
-function StickerTable({ loading, onPatch, stickers, grouped }: {
-  loading: boolean; onPatch: (sticker: Sticker, patch: StickerPatch) => void; stickers: Sticker[]; grouped: boolean;
+// Carrossel horizontal de uma seção (vira grade no desktop via .cat-carousel).
+function SectionCarousel({ name, items, onPatch }: {
+  name: string; items: Sticker[]; onPatch: (sticker: Sticker, patch: StickerPatch) => void;
 }) {
-  // Quando grouped, agrupa por seção com um cabeçalho por grupo, deixando o
-  // catálogo navegável mesmo com centenas de figurinhas. Caso contrário (uma
-  // única seção já selecionada), renderiza a lista plana.
-  const groups: Array<[string, Sticker[]]> = grouped ? groupBySection(stickers) : [['', stickers]];
-
+  const owned = items.filter((s) => s.quantity > 0).length;
   return (
-    <Card style={{ padding: 0, overflow: 'hidden' }}>
-      <div style={{ display: 'grid', gridTemplateColumns: '100px 1fr 120px 150px 120px 80px', gap: 12, padding: '10px 16px', background: 'var(--surface-container)', borderBottom: '2px solid var(--outline-variant)' }} className="hidden sm:grid">
-        {['Código', 'Figurinha', 'Status', 'Quantidade', 'Colada', 'Desejo'].map((h) => (
-          <span key={h} className="label-caps" style={{ color: 'var(--on-surface-variant)' }}>{h}</span>
+    <section style={{ marginBottom: 6 }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '0 16px 8px' }}>
+        <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 15, color: 'var(--on-surface)' }}>{name}</div>
+        <span className="label-caps" style={{ fontSize: 10, color: 'var(--on-surface-variant)' }}>{owned}/{items.length}</span>
+      </div>
+      <div className="cat-carousel">
+        {items.map((s, i) => (
+          <div className="cat-card" key={s.id}>
+            <StickerDeckCard sticker={s} index={i} total={items.length} onPatch={(p) => onPatch(s, p)} />
+          </div>
         ))}
       </div>
-      {loading ? (
+    </section>
+  );
+}
+
+// Catálogo: um carrossel por seção. Desliza na horizontal (mobile) / grade (desktop).
+function CatalogCarousel({ loading, onPatch, stickers }: {
+  loading: boolean; onPatch: (sticker: Sticker, patch: StickerPatch) => void; stickers: Sticker[];
+}) {
+  if (loading) {
+    return (
+      <Card>
         <EmptyState icon="hourglass_empty" title="Carregando catálogo" description="Buscando as figurinhas do álbum selecionado." />
-      ) : stickers.length === 0 ? (
+      </Card>
+    );
+  }
+  if (stickers.length === 0) {
+    return (
+      <Card>
         <EmptyState icon="filter_alt_off" title="Nada por aqui" description="Nenhuma figurinha bate com os filtros selecionados." />
-      ) : (
-        <div>
-          {groups.map(([name, items]) => (
-            <div key={name || 'todas'} id={name ? `secao-${name}` : undefined} style={{ scrollMarginTop: 140 }}>
-              {name && (
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '8px 16px', background: 'var(--surface-container-high)', borderTop: '1px solid var(--outline-variant)', borderBottom: '2px solid var(--outline-variant)' }}>
-                  <span style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 13, color: 'var(--on-surface)' }}>{name}</span>
-                  <span className="label-caps" style={{ fontSize: 10, color: 'var(--on-surface-variant)' }}>
-                    {items.filter((s) => s.quantity > 0).length}/{items.length}
-                  </span>
-                </div>
-              )}
-              {items.map((s) => (
-                <StickerRow key={s.id} onPatch={(p) => onPatch(s, p)} sticker={s} />
-              ))}
-            </div>
-          ))}
-        </div>
-      )}
-    </Card>
+      </Card>
+    );
+  }
+  const groups = groupBySection(stickers);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {groups.map(([name, items]) => (
+        <LazySection key={name} minHeight={480}>
+          <SectionCarousel name={name} items={items} onPatch={onPatch} />
+        </LazySection>
+      ))}
+    </div>
   );
 }
 
@@ -1810,7 +1824,7 @@ function HomePage() {
                   </div>
 
                   <CatalogToolbar filter={filter} query={query} sections={catalogSections} sectionFilter={sectionFilter} setFilter={setFilter} setQuery={setQuery} setSectionFilter={setSectionFilter} />
-                  <StickerTable loading={loading} onPatch={patchSticker} stickers={filteredStickers} grouped={sectionFilter === 'all'} />
+                  <CatalogCarousel loading={loading} onPatch={patchSticker} stickers={filteredStickers} />
                 </>
               )}
 

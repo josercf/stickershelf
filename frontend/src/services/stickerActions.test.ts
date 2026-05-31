@@ -1,5 +1,5 @@
 import { Sticker } from '../types/collection';
-import { decrementPatch, incrementPatch, needsStuckRemovalConfirm } from './stickerActions';
+import { decrementPatch, deckGhostCount, incrementPatch, needsStuckRemovalConfirm } from './stickerActions';
 
 function makeSticker(overrides: Partial<Sticker> = {}): Sticker {
   return {
@@ -71,5 +71,21 @@ describe('stickerActions — needsStuckRemovalConfirm', () => {
 
   it('não pede confirmação quando não está colada', () => {
     expect(needsStuckRemovalConfirm(makeSticker({ is_stuck: false, quantity: 2 }))).toBe(false);
+  });
+});
+
+describe('stickerActions — deckGhostCount (efeito de deck)', () => {
+  it('não desenha cartas atrás para 0 ou 1 figurinha', () => {
+    expect(deckGhostCount(0)).toBe(0);
+    expect(deckGhostCount(1)).toBe(0);
+  });
+
+  it('desenha 1 carta atrás para 2 repetidas', () => {
+    expect(deckGhostCount(2)).toBe(1);
+  });
+
+  it('desenha no máximo 2 cartas atrás para 3 ou mais repetidas', () => {
+    expect(deckGhostCount(3)).toBe(2);
+    expect(deckGhostCount(10)).toBe(2);
   });
 });

@@ -23,5 +23,13 @@ export function needsStuckRemovalConfirm(sticker: Sticker): boolean {
   return Boolean(sticker.is_stuck);
 }
 
+// Quantas cartas "fantasma" desenhar atrás da figurinha (efeito de deck de
+// repetidas): 0 para qtd <= 1, 1 para 2 repetidas, 2 para 3+ (máximo visual).
+export function deckGhostCount(quantity: number): 0 | 1 | 2 {
+  if (quantity >= 3) return 2;
+  if (quantity === 2) return 1;
+  return 0;
+}
+
 export const STUCK_REMOVAL_CONFIRM_MESSAGE =
   'Esta figurinha está marcada como colada. Deseja remover mesmo assim?';
