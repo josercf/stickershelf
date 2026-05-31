@@ -410,7 +410,7 @@ function StickerDeckCard({ onPatch, sticker, index, total }: {
       </div>
 
       {/* Figurinha com efeito de deck */}
-      <div style={{ position: 'relative', width: '70%', maxWidth: 200, margin: '2px auto 4px', aspectRatio: '3 / 4' }}>
+      <div style={{ position: 'relative', width: '80%', maxWidth: 240, margin: '4px auto 6px', aspectRatio: '3 / 4' }}>
         {ghosts >= 2 && <div style={{ ...ghostStyle, transform: 'rotate(-7deg) translate(-12px, 7px)', zIndex: 1 }} />}
         {ghosts >= 1 && <div style={{ ...ghostStyle, transform: 'rotate(6deg) translate(11px, 5px)', zIndex: 2 }} />}
         <StickerFace sticker={sticker} />
@@ -474,20 +474,54 @@ function LazySection({ minHeight, children }: { minHeight: number; children: Rea
   return <div ref={ref} style={{ minHeight: visible ? undefined : minHeight }}>{visible ? children : null}</div>;
 }
 
-// Carrossel horizontal de uma seção (vira grade no desktop via .cat-carousel).
-function SectionCarousel({ name, items, onPatch }: {
-  name: string; items: Sticker[]; onPatch: (sticker: Sticker, patch: StickerPatch) => void;
+// Detecta largura da viewport via matchMedia (reativo a resize/rotação).
+// Usado para decidir carrossel (mobile) x grade (desktop) com estilo inline,
+// imune a conflitos de cascata/CSS.
+function useIsWide(minWidth = 768) {
+  const query = `(min-width: ${minWidth}px)`;
+  const [matches, setMatches] = useState(() =>
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? window.matchMedia(query).matches
+      : false
+  );
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return;
+    const mql = window.matchMedia(query);
+    const handler = (e: MediaQueryListEvent) => setMatches(e.matches);
+    setMatches(mql.matches);
+    if (mql.addEventListener) mql.addEventListener('change', handler);
+    else mql.addListener(handler);
+    return () => {
+      if (mql.removeEventListener) mql.removeEventListener('change', handler);
+      else mql.removeListener(handler);
+    };
+  }, [query]);
+  return matches;
+}
+
+// Carrossel horizontal de uma seção no mobile; grade de cards no desktop.
+// Estilos inline (decididos por isWide) para garantir que o carrossel seja o
+// padrão no mobile, sem depender de media query no CSS.
+function SectionCarousel({ isWide, name, items, onPatch }: {
+  isWide: boolean; name: string; items: Sticker[]; onPatch: (sticker: Sticker, patch: StickerPatch) => void;
 }) {
   const owned = items.filter((s) => s.quantity > 0).length;
+  const containerStyle: React.CSSProperties = isWide
+    ? { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 16, padding: 4, alignItems: 'stretch' }
+    : { display: 'flex', flexWrap: 'nowrap', gap: 12, overflowX: 'auto', scrollSnapType: 'x mandatory', WebkitOverflowScrolling: 'touch', padding: '4px 16px 14px', alignItems: 'stretch' };
+  const cardStyle: React.CSSProperties = isWide
+    ? {}
+    : { flex: '0 0 auto', width: 'min(85vw, 340px)', scrollSnapAlign: 'center' };
+
   return (
     <section style={{ marginBottom: 6 }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '0 16px 8px' }}>
         <div style={{ fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 15, color: 'var(--on-surface)' }}>{name}</div>
         <span className="label-caps" style={{ fontSize: 10, color: 'var(--on-surface-variant)' }}>{owned}/{items.length}</span>
       </div>
-      <div className="cat-carousel">
+      <div className="cat-scroll" style={containerStyle}>
         {items.map((s, i) => (
-          <div className="cat-card" key={s.id}>
+          <div style={cardStyle} key={s.id}>
             <StickerDeckCard sticker={s} index={i} total={items.length} onPatch={(p) => onPatch(s, p)} />
           </div>
         ))}
@@ -500,6 +534,7 @@ function SectionCarousel({ name, items, onPatch }: {
 function CatalogCarousel({ loading, onPatch, stickers }: {
   loading: boolean; onPatch: (sticker: Sticker, patch: StickerPatch) => void; stickers: Sticker[];
 }) {
+  const isWide = useIsWide(768);
   if (loading) {
     return (
       <Card>
@@ -518,8 +553,8 @@ function CatalogCarousel({ loading, onPatch, stickers }: {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       {groups.map(([name, items]) => (
-        <LazySection key={name} minHeight={480}>
-          <SectionCarousel name={name} items={items} onPatch={onPatch} />
+        <LazySection key={name} minHeight={520}>
+          <SectionCarousel isWide={isWide} name={name} items={items} onPatch={onPatch} />
         </LazySection>
       ))}
     </div>
@@ -916,6 +951,10 @@ function HomePage() {
   const [query, setQuery] = useState('');
   const [sectionFilter, setSectionFilter] = useState('all');
   const [showBackToTop, setShowBackToTop] = useState(false);
+  // Ferramentas de catálogo (adicionar/gerar) começam abertas só no desktop.
+  const [catalogToolsOpen, setCatalogToolsOpen] = useState(
+    () => typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(min-width: 768px)').matches
+  );
   const [viewMode, setViewMode] = useState<ViewMode>('teams');
   const [mobileTab, setMobileTab] = useState<MobileTab>('home');
   const [loading, setLoading] = useState(true);
@@ -1793,6 +1832,22 @@ function HomePage() {
               {/* ── CATALOG VIEW ───────────────────────────────── */}
               {viewMode === 'catalog' && selectedAlbum && (
                 <>
+                  {/* Ferramentas de catálogo recolhíveis (escondidas por padrão no mobile) */}
+                  <div>
+                    <button
+                      onClick={() => setCatalogToolsOpen((o) => !o)}
+                      aria-expanded={catalogToolsOpen}
+                      style={{ width: '100%', minHeight: 44, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, borderRadius: 'var(--radius-lg)', border: '2px solid var(--outline-variant)', background: 'var(--surface-container-lowest)', padding: '10px 16px', cursor: 'pointer', boxShadow: 'var(--shadow-card)' }}
+                    >
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8, fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--on-surface)' }}>
+                        <MatIcon name="library_add" size={18} color="var(--primary)" />
+                        Adicionar ou gerar figurinhas
+                      </span>
+                      <MatIcon name={catalogToolsOpen ? 'expand_less' : 'expand_more'} size={22} color="var(--on-surface-variant)" />
+                    </button>
+                  </div>
+
+                  {catalogToolsOpen && (
                   <div className="grid gap-4 xl:grid-cols-2">
                     <Card>
                       <CardTitle>Adicionar ao catálogo</CardTitle>
@@ -1822,6 +1877,7 @@ function HomePage() {
                       </form>
                     </Card>
                   </div>
+                  )}
 
                   <CatalogToolbar filter={filter} query={query} sections={catalogSections} sectionFilter={sectionFilter} setFilter={setFilter} setQuery={setQuery} setSectionFilter={setSectionFilter} />
                   <CatalogCarousel loading={loading} onPatch={patchSticker} stickers={filteredStickers} />

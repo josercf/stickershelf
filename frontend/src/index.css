@@ -211,30 +211,13 @@ body {
 }
 
 /* ============================================================================
-   CATALOG CAROUSEL — carrossel horizontal por seção (mobile),
-   vira grade de cards no desktop (sm+).
+   CATALOG CAROUSEL — esconde a barra de rolagem do carrossel horizontal.
+   O layout (flex carrossel no mobile, grade no desktop) é decidido por
+   matchMedia + estilo inline em SectionCarousel, imune a conflitos de cascata.
    ========================================================================== */
-.cat-carousel {
-  display: flex;
-  gap: 16px;
-  overflow-x: auto;
-  scroll-snap-type: x mandatory;
-  -webkit-overflow-scrolling: touch;
-  padding: 4px 16px 14px;
+.cat-scroll {
   scrollbar-width: none;
 }
-.cat-carousel::-webkit-scrollbar { display: none; }
-.cat-card {
-  scroll-snap-align: center;
-  flex: 0 0 auto;
-  width: min(82vw, 340px);
-}
-@media (min-width: 640px) {
-  .cat-carousel {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-    overflow-x: visible;
-    padding: 4px;
-  }
-  .cat-card { width: auto; }
+.cat-scroll::-webkit-scrollbar {
+  display: none;
 }
