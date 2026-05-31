@@ -10,7 +10,7 @@ export const paniniWorldCup2026Album: AlbumInput = {
   publisher: 'Panini',
   season: '2026',
   cover_url: '',
-  total_stickers: 980,
+  total_stickers: 990,
 };
 
 const teams: PaniniTeam[] = [
@@ -70,6 +70,21 @@ function teamStickerTitle(team: PaniniTeam, number: number) {
   return `${team.name} player ${number - 2}`;
 }
 
+// Figurinhas do patrocinador oficial Coca-Cola (secao extra "Coca-Cola").
+// Codigos no mesmo estilo do template (prefixo + numero): COKE 1..COKE 10.
+export const cocaColaStickers: CatalogStickerInput[] = [
+  { code: 'COKE 1', title: 'Coca-Cola official logo', section: 'Coca-Cola' },
+  { code: 'COKE 2', title: 'Coca-Cola World Cup bottle', section: 'Coca-Cola' },
+  { code: 'COKE 3', title: 'Coca-Cola Trophy Tour', section: 'Coca-Cola' },
+  { code: 'COKE 4', title: 'Coca-Cola 2026 edition can', section: 'Coca-Cola' },
+  { code: 'COKE 5', title: 'Coca-Cola world fans', section: 'Coca-Cola' },
+  { code: 'COKE 6', title: 'Coca-Cola goal moment', section: 'Coca-Cola' },
+  { code: 'COKE 7', title: 'Coca-Cola sponsored stadium', section: 'Coca-Cola' },
+  { code: 'COKE 8', title: 'Coca-Cola mascot', section: 'Coca-Cola' },
+  { code: 'COKE 9', title: 'Coca-Cola celebration flag', section: 'Coca-Cola' },
+  { code: 'COKE 10', title: 'Coca-Cola collectible poster', section: 'Coca-Cola' },
+];
+
 export function buildPaniniWorldCup2026Catalog(): CatalogStickerInput[] {
   const intro: CatalogStickerInput[] = [
     {
@@ -95,5 +110,5 @@ export function buildPaniniWorldCup2026Catalog(): CatalogStickerInput[] {
     })
   );
 
-  return [...intro, ...teamItems];
+  return [...intro, ...teamItems, ...cocaColaStickers];
 }

@@ -3,7 +3,7 @@ import { Album, AlbumMember, AuthSession, CatalogStickerInput, CollectionStats, 
 import { collectionStore, isSupabaseConfigured, normalizeStickerCode } from '../services/collectionStore';
 import { filterStickers, groupBySection, sectionSummaries } from '../services/catalogFilters';
 import { countTradeables, isTradeable, shortUserId } from '../services/market';
-import { STUCK_REMOVAL_CONFIRM_MESSAGE, decrementPatch, deckGhostCount, incrementPatch, needsStuckRemovalConfirm } from '../services/stickerActions';
+import { STUCK_REMOVAL_CONFIRM_MESSAGE, carouselLayout, decrementPatch, deckGhostCount, incrementPatch, needsStuckRemovalConfirm } from '../services/stickerActions';
 import { buildPaniniWorldCup2026Catalog, paniniWorldCup2026Album } from '../data/paniniWorldCup2026';
 import { flagEmoji, getCountryBySection } from '../data/countries';
 import jsQR from 'jsqr';
@@ -367,11 +367,11 @@ function StickerFace({ sticker }: { sticker: Sticker }) {
         {sticker.image_url ? (
           <img alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} src={sticker.image_url} />
         ) : (
-          <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 8, padding: 10, textAlign: 'center' }}>
-            <div style={{ width: 56, height: 56, borderRadius: '50%', border: '2px solid var(--outline-variant)', background: 'rgba(255,255,255,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 20, color: 'var(--primary)' }}>
+          <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, padding: 12, textAlign: 'center' }}>
+            <div style={{ width: 84, height: 84, borderRadius: '50%', border: '2px solid var(--outline-variant)', background: 'rgba(255,255,255,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: 28, color: 'var(--primary)' }}>
               {initialsText || 'SS'}
             </div>
-            <div style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 14, lineHeight: 1.2, color: 'var(--on-surface)' }}>{sticker.title}</div>
+            <div style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 15, lineHeight: 1.2, color: 'var(--on-surface)' }}>{sticker.title}</div>
           </div>
         )}
       </div>
@@ -410,8 +410,8 @@ function StickerDeckCard({ onPatch, sticker, index, total }: {
         )}
       </div>
 
-      {/* Figurinha com efeito de deck */}
-      <div style={{ position: 'relative', width: '80%', maxWidth: 240, margin: '4px auto 6px', aspectRatio: '3 / 4' }}>
+      {/* Figurinha com efeito de deck — grande e central */}
+      <div style={{ position: 'relative', width: '88%', maxWidth: 280, margin: '8px auto 10px', aspectRatio: '3 / 4' }}>
         {ghosts >= 2 && <div style={{ ...ghostStyle, transform: 'rotate(-7deg) translate(-12px, 7px)', zIndex: 1 }} />}
         {ghosts >= 1 && <div style={{ ...ghostStyle, transform: 'rotate(6deg) translate(11px, 5px)', zIndex: 2 }} />}
         <StickerFace sticker={sticker} />
@@ -507,12 +507,9 @@ function SectionCarousel({ isWide, name, items, onPatch }: {
   isWide: boolean; name: string; items: Sticker[]; onPatch: (sticker: Sticker, patch: StickerPatch) => void;
 }) {
   const owned = items.filter((s) => s.quantity > 0).length;
-  const containerStyle: React.CSSProperties = isWide
-    ? { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))', gap: 16, padding: 4, alignItems: 'stretch' }
-    : { display: 'flex', flexWrap: 'nowrap', gap: 12, overflowX: 'auto', scrollSnapType: 'x mandatory', WebkitOverflowScrolling: 'touch', padding: '4px 16px 14px', alignItems: 'stretch' };
-  const cardStyle: React.CSSProperties = isWide
-    ? {}
-    : { flex: '0 0 auto', width: 'min(85vw, 340px)', scrollSnapAlign: 'center' };
+  // Layout 100% inline (decidido por isWide), nunca por classe CSS, para o
+  // carrossel mobile ser imune a qualquer regra de cascata (grid global etc.).
+  const { container: containerStyle, card: cardStyle } = carouselLayout(isWide);
 
   return (
     <section style={{ marginBottom: 6 }}>
