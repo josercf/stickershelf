@@ -1,4 +1,4 @@
-import { Album, AlbumInput, AlbumMember, AuthSession, CatalogStickerInput, InviteType, Sticker, StickerInput, StickerPatch } from '../types/collection';
+import { Album, AlbumInput, AlbumMember, AuthSession, CatalogStickerInput, InviteType, MarketAlbum, MarketUser, Sticker, StickerInput, StickerPatch } from '../types/collection';
 
 const configuredSupabaseUrl = process.env.REACT_APP_SUPABASE_URL?.trim().replace(/\/+$/, '') || '';
 const supabaseAnonKey = process.env.REACT_APP_SUPABASE_ANON_KEY || '';
@@ -825,5 +825,46 @@ export const collectionStore = {
       localStickersKey,
       stickers.filter((sticker) => sticker.id !== id)
     );
+  },
+
+  // --- Mercado (somente leitura) -------------------------------------------
+  // Descoberta de outros usuarios e seus albuns via RPCs SECURITY DEFINER.
+  // Nenhuma destas chamadas expoe e-mail nem dados pessoais. Em modo local
+  // (sem Supabase) o mercado fica vazio: e um recurso online.
+
+  async listMarketUsers(): Promise<MarketUser[]> {
+    if (!isSupabaseConfigured) return [];
+    const rows = await supabaseRequest<MarketUser[]>('rpc/market_list_users', {
+      method: 'POST',
+      body: JSON.stringify({}),
+    });
+    return rows.map((row) => ({
+      user_id: row.user_id,
+      album_count: Number(row.album_count || 0),
+      sticker_count: Number(row.sticker_count || 0),
+    }));
+  },
+
+  async listMarketAlbums(userId: string): Promise<MarketAlbum[]> {
+    if (!isSupabaseConfigured || !userId) return [];
+    const rows = await supabaseRequest<MarketAlbum[]>('rpc/market_list_albums', {
+      method: 'POST',
+      body: JSON.stringify({ p_user_id: userId }),
+    });
+    return rows.map((row) => ({
+      ...row,
+      sticker_count: Number(row.sticker_count || 0),
+      owned_count: Number(row.owned_count || 0),
+      duplicate_count: Number(row.duplicate_count || 0),
+    }));
+  },
+
+  async listMarketStickers(albumId: string): Promise<Sticker[]> {
+    if (!isSupabaseConfigured || !albumId) return [];
+    const result = await supabaseRequest<Sticker[]>('rpc/market_list_stickers', {
+      method: 'POST',
+      body: JSON.stringify({ p_album_id: albumId }),
+    });
+    return result.map(hydrateSticker).sort((a, b) => compareStickerCode(a.code, b.code));
   },
 };

@@ -1,7 +1,8 @@
 import React, { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
-import { Album, AlbumMember, AuthSession, CatalogStickerInput, CollectionStats, InviteType, Sticker, StickerPatch } from '../types/collection';
+import { Album, AlbumMember, AuthSession, CatalogStickerInput, CollectionStats, InviteType, MarketAlbum, MarketUser, Sticker, StickerPatch } from '../types/collection';
 import { collectionStore, isSupabaseConfigured, normalizeStickerCode } from '../services/collectionStore';
 import { filterStickers, groupBySection, sectionSummaries } from '../services/catalogFilters';
+import { countTradeables, isTradeable, shortUserId } from '../services/market';
 import { STUCK_REMOVAL_CONFIRM_MESSAGE, decrementPatch, deckGhostCount, incrementPatch, needsStuckRemovalConfirm } from '../services/stickerActions';
 import { buildPaniniWorldCup2026Catalog, paniniWorldCup2026Album } from '../data/paniniWorldCup2026';
 import { flagEmoji, getCountryBySection } from '../data/countries';
@@ -16,7 +17,7 @@ declare global {
 }
 
 type StickerFilter = 'all' | 'owned' | 'missing' | 'duplicates' | 'stuck' | 'wishlist';
-type ViewMode = 'scan' | 'teams' | 'catalog' | 'trades';
+type ViewMode = 'scan' | 'teams' | 'market' | 'catalog' | 'trades';
 type MobileTab = 'home' | ViewMode;
 
 const emptyAlbumForm = { name: '', label: '', publisher: '', season: '', cover_url: '', total_stickers: 100 };
@@ -823,6 +824,224 @@ function CountryStrip({ section }: { section: string }) {
 }
 
 /* ============================================================================
+   MERCADO (somente leitura)
+   ========================================================================== */
+
+// Avatar do usuario do mercado: circulo com as iniciais do identificador
+// publico (8 chars do UUID). Nunca mostra e-mail.
+function MarketUserAvatar({ id, size = 44 }: { id: string; size?: number }) {
+  return (
+    <div style={{ width: size, height: size, flexShrink: 0, borderRadius: '50%', background: 'var(--secondary-container)', border: '2px solid var(--outline)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: size * 0.26, color: 'var(--on-secondary-container)', letterSpacing: '0.02em' }}>
+      {id.slice(0, 2).toUpperCase()}
+    </div>
+  );
+}
+
+// Capa de um album do mercado (cover_url ou iniciais). MarketAlbum nao e um
+// Album completo, entao usamos um cover proprio em vez de <AlbumCover>.
+function MarketAlbumCover({ album, size = 48 }: { album: MarketAlbum; size?: number }) {
+  if (album.cover_url) {
+    return <img alt="" style={{ width: size, height: size, borderRadius: 'var(--radius)', objectFit: 'cover', border: '2px solid var(--outline-variant)', flexShrink: 0 }} src={album.cover_url} />;
+  }
+  return (
+    <div style={{ width: size, height: size, borderRadius: 'var(--radius)', background: 'var(--primary-container)', border: '2px solid var(--primary)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-display)', fontWeight: 700, fontSize: size * 0.3, color: 'var(--on-primary-container)', flexShrink: 0 }}>
+      {initials(album.name) || 'AL'}
+    </div>
+  );
+}
+
+// Figurinha do mercado em SOMENTE LEITURA. Repetidas (quantity > 1) ganham
+// moldura destacada e selo "TROCA", pois sao as disponiveis para troca.
+function MarketStickerCard({ sticker }: { sticker: Sticker }) {
+  const trade = isTradeable(sticker.quantity);
+  return (
+    <div style={{ position: 'relative', borderRadius: 'var(--radius-md)', border: trade ? '2px solid var(--secondary)' : '2px solid var(--outline-variant)', background: trade ? 'var(--secondary-container)' : 'var(--surface-container-lowest)', padding: 8, boxShadow: trade ? '4px 4px 0 0 var(--secondary)' : 'var(--shadow-card)' }}>
+      {trade && (
+        <span style={{ position: 'absolute', top: -9, right: 8, zIndex: 10, background: 'var(--secondary)', color: '#fff', fontFamily: 'var(--font-mono)', fontSize: 10, fontWeight: 700, padding: '3px 9px', borderRadius: 'var(--radius-full)', border: '2px solid #fff', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+          {sticker.quantity - 1}× troca
+        </span>
+      )}
+      <StickerVisual compact sticker={sticker} />
+    </div>
+  );
+}
+
+// Aba Mercado: navegacao em 3 niveis (usuarios -> albuns -> figurinhas),
+// tudo somente leitura. Estado interno proprio (drill-down).
+function MercadoView() {
+  type Level = 'users' | 'albums' | 'stickers';
+  const [level, setLevel] = useState<Level>('users');
+  const [users, setUsers] = useState<MarketUser[]>([]);
+  const [albums, setAlbums] = useState<MarketAlbum[]>([]);
+  const [stickers, setStickers] = useState<Sticker[]>([]);
+  const [activeUser, setActiveUser] = useState<MarketUser | null>(null);
+  const [activeAlbum, setActiveAlbum] = useState<MarketAlbum | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [onlyTrades, setOnlyTrades] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    async function loadUsers() {
+      try {
+        setLoading(true); setError('');
+        const result = await collectionStore.listMarketUsers();
+        if (alive) setUsers(result);
+      } catch (err) {
+        if (alive) setError(err instanceof Error ? err.message : 'Não foi possível carregar o mercado.');
+      } finally {
+        if (alive) setLoading(false);
+      }
+    }
+    loadUsers();
+    return () => { alive = false; };
+  }, []);
+
+  async function openUser(user: MarketUser) {
+    setActiveUser(user); setActiveAlbum(null); setStickers([]); setLevel('albums');
+    try {
+      setLoading(true); setError('');
+      setAlbums(await collectionStore.listMarketAlbums(user.user_id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Não foi possível carregar os álbuns deste usuário.');
+    } finally { setLoading(false); }
+  }
+
+  async function openAlbum(album: MarketAlbum) {
+    setActiveAlbum(album); setOnlyTrades(false); setLevel('stickers');
+    try {
+      setLoading(true); setError('');
+      setStickers(await collectionStore.listMarketStickers(album.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Não foi possível carregar as figurinhas deste álbum.');
+    } finally { setLoading(false); }
+  }
+
+  function back() {
+    if (level === 'stickers') { setLevel('albums'); setActiveAlbum(null); setStickers([]); }
+    else if (level === 'albums') { setLevel('users'); setActiveUser(null); setAlbums([]); }
+  }
+
+  const visibleStickers = onlyTrades ? stickers.filter((s) => isTradeable(s.quantity)) : stickers;
+  const tradeTotal = countTradeables(stickers);
+
+  if (!isSupabaseConfigured) {
+    return (
+      <Card>
+        <EmptyState icon="cloud_off" title="Mercado indisponível offline" description="O Mercado mostra outros usuários do app. Conecte-se ao Supabase para explorar coleções e trocas." />
+      </Card>
+    );
+  }
+
+  // Cabecalho com titulo, breadcrumb e botao de voltar.
+  const crumb =
+    level === 'users' ? 'Descubra colecionadores'
+    : level === 'albums' ? `Usuário ${activeUser ? shortUserId(activeUser.user_id) : ''}`
+    : `${activeAlbum?.name || 'Álbum'} · ${activeUser ? shortUserId(activeUser.user_id) : ''}`;
+
+  return (
+    <Card style={{ padding: 0, overflow: 'hidden' }}>
+      <div style={{ borderBottom: '2px solid var(--outline-variant)', padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 10 }}>
+        {level !== 'users' && (
+          <button aria-label="Voltar" onClick={back}
+            style={{ width: 36, height: 36, flexShrink: 0, borderRadius: 'var(--radius)', border: '2px solid var(--outline-variant)', background: 'var(--surface-container-lowest)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+            <MatIcon name="arrow_back" size={18} color="var(--on-surface)" />
+          </button>
+        )}
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 18, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <MatIcon name="storefront" size={20} color="var(--primary)" />
+            Mercado
+          </div>
+          <div className="label-caps" style={{ fontSize: 10, color: 'var(--on-surface-variant)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{crumb}</div>
+        </div>
+      </div>
+
+      {error && (
+        <div style={{ margin: '12px 16px 0', padding: '10px 14px', background: 'var(--error-container)', border: '2px solid var(--error)', borderRadius: 'var(--radius)', color: 'var(--on-error-container)', fontSize: 13 }}>
+          {error}
+        </div>
+      )}
+
+      {loading ? (
+        <EmptyState icon="hourglass_empty" title="Carregando" description="Buscando dados do mercado." />
+      ) : level === 'users' ? (
+        users.length === 0 ? (
+          <EmptyState icon="groups" title="Ninguém por aqui ainda" description="Quando outros usuários criarem álbuns, eles aparecem aqui para você descobrir trocas." />
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 12, padding: 16 }}>
+            {users.map((user) => (
+              <button key={user.user_id} className="hover-lift" onClick={() => openUser(user)}
+                style={{ textAlign: 'left', borderRadius: 'var(--radius-md)', border: '2px solid var(--outline-variant)', background: 'var(--surface-container-lowest)', padding: 12, cursor: 'pointer', boxShadow: 'var(--shadow-card)', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <MarketUserAvatar id={shortUserId(user.user_id)} />
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontFamily: 'var(--font-mono)', fontWeight: 700, fontSize: 14, color: 'var(--on-surface)', overflow: 'hidden', textOverflow: 'ellipsis' }}>{shortUserId(user.user_id)}</div>
+                    <div className="label-caps" style={{ fontSize: 9, color: 'var(--on-surface-variant)', marginTop: 2 }}>colecionador</div>
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6 }}>
+                  <StatChip label="Álbuns" value={user.album_count} color="var(--primary)" />
+                  <StatChip label="Figs" value={user.sticker_count} color="var(--secondary)" />
+                </div>
+              </button>
+            ))}
+          </div>
+        )
+      ) : level === 'albums' ? (
+        albums.length === 0 ? (
+          <EmptyState icon="library_books" title="Sem álbuns" description="Este usuário ainda não tem álbuns para mostrar." />
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10, padding: 16 }}>
+            {albums.map((album) => (
+              <button key={album.id} className="hover-lift" onClick={() => openAlbum(album)}
+                style={{ textAlign: 'left', borderRadius: 'var(--radius-md)', border: '2px solid var(--outline-variant)', background: 'var(--surface-container-lowest)', padding: 12, cursor: 'pointer', boxShadow: 'var(--shadow-card)', display: 'flex', alignItems: 'center', gap: 12 }}>
+                <MarketAlbumCover album={album} size={48} />
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 15, color: 'var(--on-surface)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{album.name}</div>
+                  <div className="label-caps" style={{ fontSize: 9, color: 'var(--on-surface-variant)', marginTop: 2 }}>
+                    {album.owned_count}/{Math.max(album.total_stickers, album.sticker_count)} figurinhas
+                  </div>
+                </div>
+                {album.duplicate_count > 0 && (
+                  <span style={{ flexShrink: 0, borderRadius: 'var(--radius-full)', background: 'var(--secondary-container)', padding: '4px 10px', fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 700, color: 'var(--on-secondary-container)' }}>
+                    {album.duplicate_count} trocas
+                  </span>
+                )}
+                <MatIcon name="chevron_right" size={22} color="var(--on-surface-variant)" style={{ flexShrink: 0 }} />
+              </button>
+            ))}
+          </div>
+        )
+      ) : (
+        // level === 'stickers'
+        <>
+          <div style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+            <span className="label-caps" style={{ fontSize: 10, color: 'var(--on-surface-variant)' }}>
+              {tradeTotal} figurinhas disponíveis para troca
+            </span>
+            <button onClick={() => setOnlyTrades((v) => !v)}
+              style={{ minHeight: 36, borderRadius: 'var(--radius-full)', border: onlyTrades ? '2px solid var(--secondary)' : '2px solid var(--outline-variant)', background: onlyTrades ? 'var(--secondary-container)' : 'var(--surface-container-lowest)', padding: '6px 14px', fontFamily: 'var(--font-mono)', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', color: onlyTrades ? 'var(--on-secondary-container)' : 'var(--on-surface-variant)', cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <MatIcon name="sync_alt" size={14} color={onlyTrades ? 'var(--on-secondary-container)' : 'var(--on-surface-variant)'} />
+              Só repetidas
+            </button>
+          </div>
+          {visibleStickers.length === 0 ? (
+            <EmptyState icon="style" title={onlyTrades ? 'Nenhuma repetida' : 'Álbum vazio'} description={onlyTrades ? 'Este usuário não tem figurinhas repetidas neste álbum.' : 'Este álbum ainda não tem figurinhas cadastradas.'} />
+          ) : (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 14, padding: '4px 16px 16px' }}>
+              {visibleStickers.map((s) => (
+                <MarketStickerCard key={s.id} sticker={s} />
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </Card>
+  );
+}
+
+/* ============================================================================
    LOGIN PAGE
    ========================================================================== */
 
@@ -1332,6 +1551,7 @@ function HomePage() {
     { id: 'home' as MobileTab,    icon: 'home',            label: 'Início' },
     { id: 'scan' as MobileTab,    icon: 'qr_code_scanner', label: 'Leitor' },
     { id: 'teams' as MobileTab,   icon: 'groups',          label: 'Times' },
+    { id: 'market' as MobileTab,  icon: 'storefront',      label: 'Mercado' },
     { id: 'catalog' as MobileTab, icon: 'list_alt',        label: 'Catálogo' },
     { id: 'trades' as MobileTab,  icon: 'sync_alt',        label: 'Trocas' },
   ];
@@ -1339,6 +1559,7 @@ function HomePage() {
   const DESKTOP_VIEW_TABS: { id: ViewMode; icon: string; label: string }[] = [
     { id: 'scan',    icon: 'qr_code_scanner', label: 'Leitor' },
     { id: 'teams',   icon: 'groups',          label: 'Times' },
+    { id: 'market',  icon: 'storefront',      label: 'Mercado' },
     { id: 'catalog', icon: 'list_alt',        label: 'Catálogo' },
     { id: 'trades',  icon: 'sync_alt',        label: 'Trocas' },
   ];
@@ -1828,6 +2049,9 @@ function HomePage() {
                   </Card>
                 </div>
               )}
+
+              {/* ── MARKET VIEW ────────────────────────────────── */}
+              {viewMode === 'market' && <MercadoView />}
 
               {/* ── CATALOG VIEW ───────────────────────────────── */}
               {viewMode === 'catalog' && selectedAlbum && (

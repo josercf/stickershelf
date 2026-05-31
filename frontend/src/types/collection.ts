@@ -102,3 +102,27 @@ export type CollectionStats = {
   totalRegistered: number;
   completion: number;
 };
+
+// --- Mercado (somente leitura) --------------------------------------------
+// Usuarios do app e seus albuns, vistos por outros usuarios para descobrir
+// figurinhas repetidas de troca. NUNCA carrega e-mail nem dados pessoais:
+// o identificador publico sao os 8 primeiros caracteres do UUID (user_id).
+
+export type MarketUser = {
+  user_id: string;
+  album_count: number;
+  sticker_count: number;
+};
+
+export type MarketAlbum = {
+  id: string;
+  name: string;
+  label: string | null;
+  publisher: string | null;
+  season: string | null;
+  cover_url: string | null;
+  total_stickers: number;
+  sticker_count: number;
+  owned_count: number;
+  duplicate_count: number;
+};
