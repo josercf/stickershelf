@@ -2,6 +2,7 @@ import React, { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { Album, AlbumMember, AuthSession, CatalogStickerInput, CollectionStats, InviteType, Sticker, StickerPatch } from '../types/collection';
 import { collectionStore, isSupabaseConfigured, normalizeStickerCode } from '../services/collectionStore';
 import { filterStickers, groupBySection, sectionSummaries } from '../services/catalogFilters';
+import { STUCK_REMOVAL_CONFIRM_MESSAGE, decrementPatch, incrementPatch, needsStuckRemovalConfirm } from '../services/stickerActions';
 import { buildPaniniWorldCup2026Catalog, paniniWorldCup2026Album } from '../data/paniniWorldCup2026';
 import { flagEmoji, getCountryBySection } from '../data/countries';
 import jsQR from 'jsqr';
@@ -272,6 +273,12 @@ function TeamStickerCard({ onPatch, sticker }: { onPatch: (patch: StickerPatch) 
     onPatch({ quantity: 1, owned: true, wishlisted: false });
   }
 
+  // Confirma antes de remover uma figurinha colada (evita remoção acidental).
+  function handleDecrement() {
+    if (needsStuckRemovalConfirm(sticker) && !window.confirm(STUCK_REMOVAL_CONFIRM_MESSAGE)) return;
+    onPatch(decrementPatch(sticker));
+  }
+
   const cardBg: Record<typeof state, string> = {
     empty: 'var(--surface-variant)',
     owned: 'linear-gradient(160deg, var(--primary-container), var(--primary))',
@@ -315,20 +322,32 @@ function TeamStickerCard({ onPatch, sticker }: { onPatch: (patch: StickerPatch) 
         <MatIcon name="person" size={32} fill color="rgba(255,255,255,0.85)" />
         <span className="label-caps" style={{ color: 'rgba(255,255,255,0.8)', fontSize: 9, marginTop: 4, textAlign: 'center', maxWidth: '80%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{sticker.title}</span>
       </div>
-      <div style={{ borderTop: '1px solid rgba(255,255,255,.15)', padding: '8px 8px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4 }}>
+      <div style={{ borderTop: '1px solid rgba(255,255,255,.15)', padding: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
         <button
-          style={{ borderRadius: 'var(--radius-sm)', border: 'none', padding: '6px 4px', fontFamily: 'var(--font-mono)', fontSize: 9, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.03em', cursor: 'pointer', background: sticker.is_stuck ? 'rgba(255,255,255,.3)' : 'rgba(255,255,255,.15)', color: '#fff', transition: 'all .15s' }}
+          style={{ borderRadius: 'var(--radius-sm)', border: 'none', padding: '7px 4px', fontFamily: 'var(--font-mono)', fontSize: 9, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.03em', cursor: canStick ? 'pointer' : 'not-allowed', background: sticker.is_stuck ? 'rgba(255,255,255,.3)' : 'rgba(255,255,255,.15)', color: '#fff', transition: 'all .15s', opacity: canStick ? 1 : 0.5 }}
           onClick={() => onPatch({ is_stuck: !sticker.is_stuck, quantity: sticker.quantity || 1, owned: true })}
           disabled={!canStick}
         >
           {sticker.is_stuck ? 'Colada' : 'Colar'}
         </button>
-        <button
-          style={{ borderRadius: 'var(--radius-sm)', border: 'none', padding: '6px 4px', fontFamily: 'var(--font-mono)', fontSize: 9, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.03em', cursor: 'pointer', background: 'rgba(255,255,255,.15)', color: '#fff', transition: 'all .15s' }}
-          onClick={() => onPatch({ quantity: Math.max(0, sticker.quantity - 1), owned: sticker.quantity - 1 > 0 })}
-        >
-          -1
-        </button>
+        {/* Stepper de quantidade: [-1] [qtd] [+1] para marcar repetidas */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <button
+            aria-label="Remover uma"
+            style={{ flex: 1, borderRadius: 'var(--radius-sm)', border: 'none', padding: '7px 4px', fontFamily: 'var(--font-display)', fontSize: 15, fontWeight: 700, cursor: 'pointer', background: 'rgba(255,255,255,.15)', color: '#fff', transition: 'all .15s' }}
+            onClick={handleDecrement}
+          >
+            −
+          </button>
+          <span style={{ minWidth: 18, textAlign: 'center', fontFamily: 'var(--font-mono)', fontSize: 12, fontWeight: 700, color: '#fff' }}>{sticker.quantity}</span>
+          <button
+            aria-label="Adicionar repetida"
+            style={{ flex: 1, borderRadius: 'var(--radius-sm)', border: 'none', padding: '7px 4px', fontFamily: 'var(--font-display)', fontSize: 15, fontWeight: 700, cursor: 'pointer', background: 'rgba(255,255,255,.15)', color: '#fff', transition: 'all .15s' }}
+            onClick={() => onPatch(incrementPatch(sticker))}
+          >
+            +
+          </button>
+        </div>
       </div>
     </article>
   );
@@ -343,8 +362,13 @@ function StickerRow({ onPatch, sticker }: { onPatch: (patch: StickerPatch) => vo
   const canStick = isOwned || sticker.is_stuck;
 
   // Ações compartilhadas entre o card mobile e a linha da tabela (desktop).
-  const dec = () => onPatch({ quantity: Math.max(sticker.quantity - 1, 0), owned: sticker.quantity - 1 > 0, is_stuck: sticker.quantity - 1 > 0 ? sticker.is_stuck : false });
-  const inc = () => onPatch({ quantity: sticker.quantity + 1, owned: true, wishlisted: false });
+  // Antes de decrementar uma figurinha colada, pede confirmação para evitar
+  // remoções acidentais de figurinhas já coladas no álbum.
+  const dec = () => {
+    if (needsStuckRemovalConfirm(sticker) && !window.confirm(STUCK_REMOVAL_CONFIRM_MESSAGE)) return;
+    onPatch(decrementPatch(sticker));
+  };
+  const inc = () => onPatch(incrementPatch(sticker));
   const toggleStuck = () => onPatch({ is_stuck: !sticker.is_stuck, quantity: sticker.quantity || 1, owned: true });
   const toggleWish = () => onPatch({ wishlisted: !sticker.wishlisted });
 
